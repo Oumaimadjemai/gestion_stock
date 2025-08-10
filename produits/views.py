@@ -95,60 +95,7 @@ class ImportProduitExcelView(APIView):
         produit_resource.import_data(dataset, dry_run=False)
         return HttpResponse({"detail": "Importation réussie."})
 
-# views.py
-# views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.http import HttpResponse
-from rest_framework.permissions import AllowAny
-from .barcode_svg import generate_custom_ean13_svg
 
-
-# views.py
-# views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-import os
-from reportlab.graphics import renderPDF
-from svglib.svglib import svg2rlg
-from django.conf import settings
-import win32print
-import win32api
-
-class PrintBarcodeServerView(APIView):
-    def post(self, request):
-        svg_content = request.data.get("svg")
-        code = request.data.get("code")
-
-        if not svg_content or not code:
-            return Response({"error": "SVG and code required"}, status=400)
-
-        # Save SVG
-        barcodes_dir = os.path.join(settings.MEDIA_ROOT, "barcodes")
-        os.makedirs(barcodes_dir, exist_ok=True)
-        svg_path = os.path.join(barcodes_dir, f"{code}.svg")
-        with open(svg_path, "w", encoding="utf-8") as f:
-            f.write(svg_content)
-
-        # Convert SVG → PDF
-        pdf_path = svg_path.replace(".svg", ".pdf")
-        drawing = svg2rlg(svg_path)
-        renderPDF.drawToFile(drawing, pdf_path)
-
-        # --- Windows auto-print ---
-        printer_name = win32print.GetDefaultPrinter()
-        try:
-            win32api.ShellExecute(
-                0,
-                "print",
-                pdf_path,
-                None,
-                ".",
-                0
-            )
-            return Response({"message": f"Barcode sent to printer {printer_name}", "pdf": pdf_path})
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
 
 from rest_framework.views import APIView

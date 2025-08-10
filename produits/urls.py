@@ -6,6 +6,5 @@ urlpatterns = [
     path('produits/<int:pk>/', ProduitRetrieveUpdateDestroyAPIView.as_view(), name='produit-detail'),
     path("produits/export-excel/", ExportProduitExcelView.as_view(), name="produits-export"),
     path("produits/import-excel/", ImportProduitExcelView.as_view(), name="produits-import"),
-    path('print-barcode-server/',PrintBarcodeServerView.as_view()),
     path('comparaison/', ProduitComparaisonView.as_view(), name='produits-comparaison'),
 ]
