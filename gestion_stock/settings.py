@@ -144,44 +144,6 @@ template_path = "gestion_stock/templates_word"
 WSGI_APPLICATION = 'gestion_stock.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'stock',
-#         'USER': 'postgres',
-#         'PASSWORD': 'root',  # Celui défini à l'installation
-#         'HOST': 'localhost',
-#         'PORT': '5432',
-#     }
-# }
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'railway',
-#         'USER': 'postgres',
-#         'PASSWORD': 'nGuxgTffsvBSyjzQdeAElkZhwvjrZojF',
-#         'HOST': 'postgres-production-9d48.up.railway.app',
-#         'PORT': '5432',
-#         'OPTIONS': {
-#             'sslmode': 'require',  # Very important for Render
-#         },
-#     }
-# }
-# import dj_database_url
-# import os
-
-# DATABASE_URL = "postgresql://postgres:nGuxgTffsvBSyjzQdeAElkZhwvjrZojF@trolley.proxy.rlwy.net:26299/railway"
-
-# DATABASES = {
-#     'default': dj_database_url.parse(
-#         DATABASE_URL,
-#         conn_max_age=600,  # keeps connection open for reuse
-#         ssl_require=True   # Railway requires SSL
-#     )
-# }
 
 
 # Password validation
