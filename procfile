@@ -1,1 +1,1 @@
-web: gunicorn gestion_stock.wsgi:application
+python manage.py migrate && gunicorn gestion_stock.wsgi
