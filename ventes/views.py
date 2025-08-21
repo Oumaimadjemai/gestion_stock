@@ -394,15 +394,161 @@ class VentePaiementAPIView(APIView):
 
         return self.get(request, pk)
     
+from collections import defaultdict
+from decimal import Decimal
+from django.utils.timezone import now
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.views import APIView
+from django.core.files.storage import default_storage
+from ventes.models import Client, VenteFacilite, PaiementVente
+
+
+from collections import defaultdict
+from decimal import Decimal
+from django.utils.timezone import now
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.shortcuts import get_object_or_404
 from django.core.files.storage import default_storage
 
-from authentification.models import Client
+from ventes.models import Client, VenteFacilite, PaiementVente
 
 
+# class ImportPaiementsTxtAPIView(APIView):
+#     """
+#     POST /vente/import-paiements-txt/
+#     Body: { "file": <fichier.txt> }
+#     """
+
+#     def handle_file(self, file_path):
+#         paiements_effectues = []
+#         erreurs = []
+
+#         # 👇 Grouping (ccp + month) -> total amount
+#         grouped_paiements = defaultdict(Decimal)
+
+#         with open(file_path, "r", encoding="utf-8") as f:
+#             for line in f:
+#                 try:
+#                     ccp = line[0:10].strip()
+#                     name = line[10:35].strip()
+#                     montant_str = line[35:49].strip()
+#                     date_str = line[49:59].strip()  # format DD/MM/YYYY
+
+#                     # Nettoyage du nom
+#                     if name.startswith("M."):
+#                         name = name[2:].strip()
+#                     elif name.lower().startswith("melle."):
+#                         name = name[6:].strip()
+
+#                     # Conversion montant
+#                     try:
+#                         montant = Decimal(montant_str)
+#                     except Exception:
+#                         erreurs.append({
+#                             "ligne": line.strip(),
+#                             "error": f"Montant invalide: {montant_str}"
+#                         })
+#                         continue
+
+#                     # Extraire le mois depuis la date
+#                     try:
+#                         month_index = int(date_str[3:5]) - 1  # "MM" → index (0-based)
+#                     except Exception:
+#                         erreurs.append({
+#                             "ligne": line.strip(),
+#                             "error": f"Date invalide: {date_str}"
+#                         })
+#                         continue
+
+#                     # 👇 Group par client+mois
+#                     grouped_paiements[(ccp, month_index)] += montant
+
+#                 except Exception as e:
+#                     erreurs.append({
+#                         "ligne": line.strip(),
+#                         "error": str(e)
+#                     })
+
+#         # 👇 Appliquer les paiements groupés
+#         for (ccp, month_index), total_montant in grouped_paiements.items():
+#             try:
+#                 # 1️⃣ Client
+#                 try:
+#                     client = Client.objects.get(ccp=ccp)
+#                 except Client.DoesNotExist:
+#                     erreurs.append({
+#                         "ccp": ccp,
+#                         "error": f"Client introuvable CCP={ccp}"
+#                     })
+#                     continue
+
+#                 # 2️⃣ Vente active
+#                 vente = VenteFacilite.objects.filter(client=client, solde_regle=False).first()
+#                 if not vente:
+#                     erreurs.append({
+#                         "client": client.id,
+#                         "error": "Pas de vente active trouvée"
+#                     })
+#                     continue
+
+#                 # 3️⃣ Paiement
+#                 with transaction.atomic():
+#                     PaiementVente.objects.create(
+#                         vente=vente,
+#                         montant=total_montant,
+#                         month_index=month_index,
+#                         status="paid",
+#                         date_paiement=now()
+#                     )
+
+#                     # ✅ Mise à jour de la vente (sans toucher mois_status)
+#                     vente.montant_paye_effectif += total_montant
+#                     vente.montant_restant = max(Decimal(0), vente.montant_restant - total_montant)
+#                     if vente.montant_restant == 0:
+#                         vente.solde_regle = True
+#                     vente.last_payment_date = now().date()
+#                     vente.save()
+
+#                 paiements_effectues.append({
+#                     "client": str(client),
+#                     "vente": vente.id,
+#                     "paiement": str(total_montant),
+#                     "mois": month_index + 1
+#                 })
+
+#             except Exception as e:
+#                 erreurs.append({
+#                     "ccp": ccp,
+#                     "error": str(e)
+#                 })
+
+#         return {"paiements_effectues": paiements_effectues, "erreurs": erreurs}
+
+#     def post(self, request, *args, **kwargs):
+#         file = request.FILES.get("file")
+#         if not file:
+#             return Response({"error": "Aucun fichier fourni"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         file_path = default_storage.save(file.name, file)
+#         try:
+#             result = self.handle_file(file_path)
+#         finally:
+#             default_storage.delete(file_path)
+
+#         return Response(result, status=status.HTTP_201_CREATED)
+import io
+from collections import defaultdict
+from decimal import Decimal
+from django.db import transaction
+from django.utils.timezone import now
+from django.core.files.storage import default_storage
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from ventes.models import Client, VenteFacilite, PaiementVente  # adjust import as needed
 
 class ImportPaiementsTxtAPIView(APIView):
     """
@@ -410,60 +556,129 @@ class ImportPaiementsTxtAPIView(APIView):
     Body: { "file": <fichier.txt> }
     """
 
+    def handle_file(self, file_path):
+        if not default_storage.exists(file_path):
+            return {"paiements_effectues": [], "erreurs": [{"error": "Fichier introuvable"}]}
+
+        paiements_effectues = []
+        erreurs = []
+
+        # Grouping (ccp + month) -> total amount
+        grouped_paiements = defaultdict(Decimal)
+
+        # Open binary file and wrap as text
+        with default_storage.open(file_path, "rb") as f:
+            text_file = io.TextIOWrapper(f, encoding="utf-8")
+            for line in text_file:
+                try:
+                    ccp = line[0:10].strip()
+                    name = line[10:35].strip()
+                    montant_str = line[35:49].strip()
+                    date_str = line[49:59].strip()  # format DD/MM/YYYY
+
+                    # Nettoyage du nom
+                    if name.startswith("M."):
+                        name = name[2:].strip()
+                    elif name.lower().startswith("melle."):
+                        name = name[6:].strip()
+
+                    # Conversion montant
+                    try:
+                        montant = Decimal(montant_str)
+                    except Exception:
+                        erreurs.append({
+                            "ligne": line.strip(),
+                            "error": f"Montant invalide: {montant_str}"
+                        })
+                        continue
+
+                    # Extraire le mois depuis la date
+                    try:
+                        month_index = int(date_str[3:5]) - 1  # "MM" → index (0-based)
+                    except Exception:
+                        erreurs.append({
+                            "ligne": line.strip(),
+                            "error": f"Date invalide: {date_str}"
+                        })
+                        continue
+
+                    # Group par client+mois
+                    grouped_paiements[(ccp, month_index)] += montant
+
+                except Exception as e:
+                    erreurs.append({
+                        "ligne": line.strip(),
+                        "error": str(e)
+                    })
+
+        # Appliquer les paiements groupés
+        for (ccp, month_index), total_montant in grouped_paiements.items():
+            try:
+                # 1️⃣ Client
+                try:
+                    client = Client.objects.get(ccp=ccp)
+                except Client.DoesNotExist:
+                    erreurs.append({
+                        "ccp": ccp,
+                        "error": f"Client introuvable CCP={ccp}"
+                    })
+                    continue
+
+                # 2️⃣ Vente active
+                vente = VenteFacilite.objects.filter(client=client, solde_regle=False).first()
+                if not vente:
+                    erreurs.append({
+                        "client": client.id,
+                        "error": "Pas de vente active trouvée"
+                    })
+                    continue
+
+                # 3️⃣ Paiement
+                with transaction.atomic():
+                    PaiementVente.objects.create(
+                        vente=vente,
+                        montant=total_montant,
+                        month_index=month_index,
+                        status="paid",
+                        date_paiement=now()
+                    )
+
+                    # Mise à jour de la vente (sans toucher mois_status)
+                    vente.montant_paye_effectif += total_montant
+                    vente.montant_restant = max(Decimal(0), vente.montant_restant - total_montant)
+                    if vente.montant_restant == 0:
+                        vente.solde_regle = True
+                    vente.last_payment_date = now().date()
+                    vente.save()
+
+                paiements_effectues.append({
+                    "client": str(client),
+                    "vente": vente.id,
+                    "paiement": str(total_montant),
+                    "mois": month_index + 1
+                })
+
+            except Exception as e:
+                erreurs.append({
+                    "ccp": ccp,
+                    "error": str(e)
+                })
+
+        return {"paiements_effectues": paiements_effectues, "erreurs": erreurs}
+
     def post(self, request, *args, **kwargs):
         file = request.FILES.get("file")
         if not file:
             return Response({"error": "Aucun fichier fourni"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Sauvegarde temporaire
         file_path = default_storage.save(file.name, file)
+        try:
+            result = self.handle_file(file_path)
+        finally:
+            if default_storage.exists(file_path):
+                default_storage.delete(file_path)
 
-        paiements_effectues = []
-        erreurs = []
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    # 🟢 Extraire infos depuis la ligne
-                    code_client = line[0:10].strip()
-                    nom_client = line[10:40].strip()
-                    montant_str = line[40:55].strip()
-                    montant = int(float(montant_str))  # ex: 00000001200.00 -> 1200
-
-                    # 1️⃣ Trouver le client
-                    try:
-                        client = Client.objects.get(nom__icontains=nom_client.split()[-1])
-                    except Client.DoesNotExist:
-                        erreurs.append({"ligne": line.strip(), "error": "Client introuvable"})
-                        continue
-
-                    # 2️⃣ Trouver une vente active pour ce client
-                    vente = VenteFacilite.objects.filter(client=client).first()
-                    if not vente:
-                        erreurs.append({"client": client.id, "error": "Vente non trouvée"})
-                        continue
-
-                    # 3️⃣ Créer le paiement
-                    paiement = PaiementVente.objects.create(
-                        vente=vente,
-                        montant=montant,
-                        month_index=vente.paiements.count(),
-                        status="paid"
-                    )
-
-                    paiements_effectues.append(PaiementVenteSerializer(paiement).data)
-
-                except Exception as e:
-                    erreurs.append({"ligne": line.strip(), "error": str(e)})
-
-        return Response(
-            {
-                "paiements_effectues": paiements_effectues,
-                "erreurs": erreurs
-            },
-            status=status.HTTP_201_CREATED
-        )
-
+        return Response(result, status=status.HTTP_201_CREATED)
 
 from django.db import transaction
 class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
