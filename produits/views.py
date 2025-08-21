@@ -61,10 +61,18 @@ class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
     serializer_class = ProduitSerializer
 
     def perform_destroy(self, instance):
-        if instance.image:
+       if instance.image:
+        try:
+            # Delete the image from Cloudinary
             instance.image.delete()
-        instance.est_supprime = True
-        instance.save()
+        except Exception as e:
+            # Log it but don't break deletion
+            print(f"Error deleting Cloudinary image: {e}")
+
+    # Mark as deleted in DB
+       instance.est_supprime = True
+       instance.save()
+
 
 class ExportProduitExcelView(APIView):
     permission_classes = [IsAuthenticated]
