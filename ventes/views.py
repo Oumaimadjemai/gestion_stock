@@ -8,41 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
 from .filters import *
 from django.db.models.functions import Coalesce
-# class VenteFaciliteCreateAPIView(generics.ListCreateAPIView):
-#     queryset = VenteFacilite.objects.all().select_related('client', 'utilisateur')
-#     serializer_class = VenteFaciliteSerializer
-#     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-#     filterset_class = VenteFaciliteFilter
 
-#     # ✅ search client by any name
-#     search_fields = [
-#         'client__nom_famille_fr',
-#         'client__prenom_fr',
-#         'client__nom_famille_ar',
-#         'client__prenom_ar',
-#         'client__ccp',
-#         'client__cle'
-#     ]
-
-#     def list(self, request, *args, **kwargs):
-#         # ✅ Apply filters + search
-#         queryset = self.filter_queryset(self.get_queryset())
-
-#         serializer = self.get_serializer(queryset, many=True)
-
-#         # ✅ Calculate totals efficiently
-#         stats = queryset.aggregate(
-#     total_ventes=Count('id'),
-#     total_montant_total=Coalesce(Sum('montant_total'), Value(0, output_field=DecimalField())),
-#     total_montant_verse=Coalesce(Sum('montant_verse'), Value(0, output_field=DecimalField())),
-#     total_montant_restant=Coalesce(Sum('montant_restant'), Value(0, output_field=DecimalField())),
-# )
-        
-
-#         return Response({
-#             "ventes": serializer.data,
-#             **stats
-#         })
 from django.db.models import Sum, Count, Value, DecimalField, IntegerField, Q
 from django.db.models.functions import Coalesce
 from rest_framework.response import Response
@@ -201,197 +167,7 @@ from rest_framework import status
 from .models import VenteFacilite, PaiementVente
 from .serializers import PaiementVenteSerializer
 
-# class VentePaiementAPIView(APIView):
-#     """
-#     GET  -> Historique des ventes + paiements détaillés
-#     POST -> Effectuer un paiement pour une vente avec statut mensuel
-#     PATCH -> Changer le statut d’un paiement existant
-#     """
 
-#     def get(self, request, pk=None):
-#         client_id = request.query_params.get("client")
-#         ventes = VenteFacilite.objects.all()
-
-#         if pk:
-#             ventes = ventes.filter(id=pk)
-#         elif client_id:
-#             ventes = ventes.filter(client_id=client_id)
-
-#         if not ventes.exists():
-#             return Response({"error": "Aucune vente trouvée."}, status=status.HTTP_404_NOT_FOUND)
-
-#         history = []
-#         for vente in ventes:
-#             paiements_qs = vente.paiements.all().order_by("date_paiement")
-#             paiements_list = [
-#                 {
-#                     "id": p.id,
-#                     "montant": float(p.montant),
-#                     "date_paiement": p.date_paiement.isoformat(),
-#                     "month_index": p.month_index,
-#                     "status": p.status
-#                 }
-#                 for p in paiements_qs
-#             ]
-
-#             unpaid_count = paiements_qs.filter(status="pending").count()
-
-#             history.append({
-#                 "vente_id": vente.id,
-#                 "client_detail": {
-#                     "id": vente.client.id,
-#                     "nom_famille_ar": vente.client.nom_famille_ar,
-#                     "prenom_ar": vente.client.prenom_ar,
-#                     "nom_famille_fr": vente.client.nom_famille_fr,
-#                     "prenom_fr": vente.client.prenom_fr,
-#                     "ccp": vente.client.ccp,
-#                     "cle": vente.client.cle,
-#                     "telephone": vente.client.telephone,
-#                 },
-#                 "montant_mensuel": float(vente.montant_mensuel),
-#                 "montant_par_mois":vente.montants_par_mois,
-#                 "nombre_mois": vente.nombre_mois,
-#                 "date_debut": vente.date_debut.strftime("%Y-%m-%d"),
-#                 "mois_status": vente.mois_status,
-#                 "total_verse_effectif": float(vente.montant_paye_effectif),
-#                 "reste_vente": float(vente.montant_restant),
-#                 "reste_global": float(
-#                     VenteFacilite.objects.filter(client=vente.client)
-#                     .aggregate(total_restant=Sum('montant_restant'))['total_restant'] or 0
-#                 ),
-#                 "solde_regle": vente.montant_restant <= 0,
-#                 "unpaid_count": unpaid_count,
-#                 "paiements": paiements_list
-#             })
-
-#         return Response(history, status=status.HTTP_200_OK)
-
-#     def patch(self, request, pk=None):
-#         """
-#         PATCH /vente/vente/payer/<paiement_id>/
-#         Body: {"status": "pending" or "paid"}
-#         """
-#         paiement_id = pk
-#         new_status = request.data.get("status")
-
-#         if new_status not in ["pending", "paid","unpaid"]:
-#             return Response(
-#                 {"error": "Status invalide. Choisissez 'pending' ou 'paid' 'unpaid'."},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-
-#         try:
-#             paiement = PaiementVente.objects.select_related("vente").get(id=paiement_id)
-#         except PaiementVente.DoesNotExist:
-#             return Response(
-#                 {"error": "Paiement introuvable."},
-#                 status=status.HTTP_404_NOT_FOUND,
-#             )
-
-#         old_status = paiement.status
-#         if old_status == new_status:
-#             return Response(
-#                 {"message": "Aucune modification effectuée. Le statut est identique."},
-#                 status=status.HTTP_200_OK,
-#             )
-
-#         vente = paiement.vente
-
-#         with transaction.atomic():
-#             montant_change = paiement.montant  # déjà un Decimal
-#             message_detail = None
-
-#             # --- Mettre à jour les montants ---
-#             if old_status == "paid" and new_status in ["pending", "unpaid"]:
-#                vente.montant_paye_effectif -= montant_change
-#                vente.montant_restant += montant_change
-#             elif old_status in ["pending", "unpaid"] and new_status == "paid":
-#                vente.montant_paye_effectif += montant_change
-#                vente.montant_restant -= montant_change
-
-
-#             # --- Mettre à jour mois_status si applicable ---
-#             if paiement.month_index is not None:
-#                 mois_status = vente.mois_status or ["pending"] * vente.nombre_mois
-#                 if 0 <= paiement.month_index < len(mois_status):
-#                     mois_status[paiement.month_index] = new_status
-#                     vente.mois_status = mois_status
-
-#             # --- Mettre à jour le paiement ---
-#             paiement.status = new_status
-#             paiement.save(update_fields=["status"])
-
-#             # --- Vérifier si la vente est réglée ---
-#             vente.solde_regle = vente.montant_restant <= 0
-
-#             # --- Sauvegarder la vente ---
-#             vente.save(update_fields=[
-#                 "montant_paye_effectif",
-#                 "montant_restant",
-#                 "mois_status",
-#                 "solde_regle"
-#             ])
-
-#         # --- Calcul du reste global et des unpaid ---
-#         reste_global = (
-#             VenteFacilite.objects.filter(client=vente.client)
-#             .aggregate(total_restant=Sum("montant_restant"))["total_restant"]
-#             or 0
-#         )
-#         unpaid_count = vente.paiements.filter(status="pending").count()
-
-#         return Response(
-#             {
-#                 "message": f"Paiement #{paiement.id} passé de {old_status} à {new_status}. {message_detail}",
-#                 "vente_id": vente.id,
-#                 "total_verse_effectif": float(vente.montant_paye_effectif),
-#                 "reste_vente": float(vente.montant_restant),
-#                 "reste_global": float(reste_global),
-#                 "solde_regle": vente.solde_regle,
-#                 "unpaid_count": unpaid_count,
-#             },
-#             status=status.HTTP_200_OK,
-#         )
-
-#     def post(self, request, pk):
-#         """Effectue un paiement pour une vente spécifique et met à jour mois_status"""
-#         try:
-#             vente = VenteFacilite.objects.get(pk=pk)
-#         except VenteFacilite.DoesNotExist:
-#             return Response({"error": "Vente introuvable"}, status=status.HTTP_404_NOT_FOUND)
-
-#         montant = Decimal(request.data.get("montant", vente.montant_mensuel))
-#         calendar_month_index = int(request.data.get("month", 0))  # 0-11
-#         status_str = request.data.get("status", "pending")
-
-#         if vente.montant_restant <= 0:
-#             return Response({"message": "La dette est déjà réglée."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         paiement = min(montant, vente.montant_restant)
-
-#         # ✅ Update vente amounts
-#         vente.montant_restant -= paiement
-#         vente.montant_paye_effectif += paiement
-#         vente.last_payment_date = now().date()
-
-#         # ✅ Update month status array
-#         mois_status = vente.mois_status or ["pending"] * vente.nombre_mois
-#         if 0 <= calendar_month_index < len(mois_status):
-#             mois_status[calendar_month_index] = status_str
-
-#         vente.mois_status = mois_status
-#         vente.solde_regle = vente.montant_restant <= 0
-#         vente.save()
-
-#         # ✅ Save paiement detail
-#         PaiementVente.objects.create(
-#             vente=vente,
-#             montant=paiement,
-#             month_index=calendar_month_index,
-#             status=status_str
-#         )
-
-#         return self.get(request, pk)
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -617,6 +393,77 @@ class VentePaiementAPIView(APIView):
         )
 
         return self.get(request, pk)
+    
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from django.core.files.storage import default_storage
+
+from authentification.models import Client
+
+
+
+class ImportPaiementsTxtAPIView(APIView):
+    """
+    POST /vente/import-paiements-txt/
+    Body: { "file": <fichier.txt> }
+    """
+
+    def post(self, request, *args, **kwargs):
+        file = request.FILES.get("file")
+        if not file:
+            return Response({"error": "Aucun fichier fourni"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Sauvegarde temporaire
+        file_path = default_storage.save(file.name, file)
+
+        paiements_effectues = []
+        erreurs = []
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    # 🟢 Extraire infos depuis la ligne
+                    code_client = line[0:10].strip()
+                    nom_client = line[10:40].strip()
+                    montant_str = line[40:55].strip()
+                    montant = int(float(montant_str))  # ex: 00000001200.00 -> 1200
+
+                    # 1️⃣ Trouver le client
+                    try:
+                        client = Client.objects.get(nom__icontains=nom_client.split()[-1])
+                    except Client.DoesNotExist:
+                        erreurs.append({"ligne": line.strip(), "error": "Client introuvable"})
+                        continue
+
+                    # 2️⃣ Trouver une vente active pour ce client
+                    vente = VenteFacilite.objects.filter(client=client).first()
+                    if not vente:
+                        erreurs.append({"client": client.id, "error": "Vente non trouvée"})
+                        continue
+
+                    # 3️⃣ Créer le paiement
+                    paiement = PaiementVente.objects.create(
+                        vente=vente,
+                        montant=montant,
+                        month_index=vente.paiements.count(),
+                        status="paid"
+                    )
+
+                    paiements_effectues.append(PaiementVenteSerializer(paiement).data)
+
+                except Exception as e:
+                    erreurs.append({"ligne": line.strip(), "error": str(e)})
+
+        return Response(
+            {
+                "paiements_effectues": paiements_effectues,
+                "erreurs": erreurs
+            },
+            status=status.HTTP_201_CREATED
+        )
+
 
 from django.db import transaction
 class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
