@@ -55,7 +55,7 @@ def generer_codes_barres_uniques(existants, nombre):
 
 
 # --- Product Model ---
-
+from cloudinary.models import CloudinaryField
 class Produit(models.Model):
     reference = models.CharField(max_length=100, null=True)
     nom = models.CharField(max_length=100, verbose_name="اسم المنتوج / Nom produit")
