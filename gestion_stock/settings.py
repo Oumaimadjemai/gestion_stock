@@ -230,5 +230,9 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # CORS settings (if your frontend is on a different domain)
-CORS_ALLOW_ALL_ORIGINS = True  # For development only, restrict in production
+CORS_ALLOWED_ORIGINS = [
+    "https://darlokman.netlify.app",
+    "http://localhost:3000",   # utile pour dev
+]
+ # For development only, restrict in production
 CORS_ALLOW_CREDENTIALS = True
