@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from .models import Produit
 from parametres.serializers import MagasinSerializer
-
+import cloudinary.uploader
 
 class ProduitSerializer(serializers.ModelSerializer):
     magasin_detail = MagasinSerializer(source='magasin', read_only=True)
@@ -50,12 +50,16 @@ class ProduitSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
-        # 👇 Handle clearing image when empty string or null is passed
+        # 👇 Handle clearing image
         if 'image' in validated_data:
             if validated_data['image'] in ["", None]:
-                if instance.image:
-                    instance.image.delete(save=False)  # delete from Cloudinary
+                if instance.image:  
+                    # Extract public_id from CloudinaryField
+                    public_id = str(instance.image.public_id)
+                    if public_id:
+                        cloudinary.uploader.destroy(public_id)  # ✅ delete from Cloudinary
                 validated_data['image'] = None
+
         return super().update(instance, validated_data)
 
 class ProduitMiniSerializer(serializers.ModelSerializer):
