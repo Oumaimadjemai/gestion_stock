@@ -17,9 +17,9 @@ urlpatterns = [
     path('fournisseurs/<int:pk>/', FournisseurRetrieveUpdateDestroyView.as_view(), name='fournisseur-retrieve-update-destroy'),
     path('fournisseurs/export/', FournisseurExportExcelView.as_view(), name='fournisseur-export'),
     path('fournisseurs/import/', FournisseurImportExcelView.as_view(), name='fournisseur-import'),
-
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('admin/change-password/', AdminChangeUserPasswordView.as_view(), name='admin-change-password'),
     path('clients/files/<int:pk>/download/', download_fichier_client, name='download_fichier_client'),
+    path('chat/',ChatAPIView,name='chat')
 ]
