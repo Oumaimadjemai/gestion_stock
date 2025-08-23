@@ -48,7 +48,8 @@ TYPE_PIECE_IDENTITE = [
 
 class Client(models.Model):
     # Informations personnelles (bilingues)
-    # numero = models.CharField(max_length=50, verbose_name="الرقم / Numéro",null=True)
+    assurance_militaire = models.CharField(max_length=50, verbose_name="assurance",null=True)
+    date_expedition = models.DateField(verbose_name="date_expedition",null=True)
     nom_famille_ar = models.CharField(max_length=100, verbose_name="اللقب (عربي)",null=True)
     prenom_ar = models.CharField(max_length=100, verbose_name="الاسم (عربي)",null=True)
     nom_famille_fr = models.CharField(max_length=100, verbose_name="Nom de famille (français)",null=True)
