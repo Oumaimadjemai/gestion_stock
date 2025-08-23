@@ -21,5 +21,5 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('admin/change-password/', AdminChangeUserPasswordView.as_view(), name='admin-change-password'),
     path('clients/files/<int:pk>/download/', download_fichier_client, name='download_fichier_client'),
-    path('chat/',ChatAPIView,name='chat')
+     path('chat/', ChatAPIView.as_view(), name='chat'),
 ]
