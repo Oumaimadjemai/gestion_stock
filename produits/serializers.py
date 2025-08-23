@@ -9,7 +9,7 @@ class ProduitSerializer(serializers.ModelSerializer):
     codebar_principal = serializers.SerializerMethodField()
     moyenne_pourcentage_facilite = serializers.SerializerMethodField()
     nouveaux_codes_barres = serializers.SerializerMethodField()
-    image = serializers.ImageField(required=False) 
+    image = serializers.ImageField(required=False, allow_null=True)  # 👈 allow null
 
     class Meta:
         model = Produit
@@ -48,6 +48,15 @@ class ProduitSerializer(serializers.ModelSerializer):
         if len(value) != len(set(value)):
             raise serializers.ValidationError("Les codes-barres doivent être uniques")
         return value
+
+    def update(self, instance, validated_data):
+        # 👇 Handle clearing image when empty string or null is passed
+        if 'image' in validated_data:
+            if validated_data['image'] in ["", None]:
+                if instance.image:
+                    instance.image.delete(save=False)  # delete from Cloudinary
+                validated_data['image'] = None
+        return super().update(instance, validated_data)
 
 class ProduitMiniSerializer(serializers.ModelSerializer):
     class Meta:
