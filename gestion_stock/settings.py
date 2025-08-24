@@ -74,7 +74,7 @@ INSTALLED_APPS = [
     'notes',
     'cloudinary',
     'cloudinary_storage',
-    'channels',
+    
 ]
 AUTH_USER_MODEL = 'authentification.CustomUser'
 CORS_ALLOW_ALL_ORIGINS = True
@@ -237,15 +237,3 @@ CORS_ALLOWED_ORIGINS = [
 ]
  # For development only, restrict in production
 CORS_ALLOW_CREDENTIALS = True
-ASGI_APPLICATION = "gestion_stock.asgi.application"
-
-# Optional Redis backend
-# settings.py
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [("redis-production-b899.up.railway.app", 6379)],
-        },
-    },
-}
