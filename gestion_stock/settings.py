@@ -240,11 +240,12 @@ CORS_ALLOW_CREDENTIALS = True
 ASGI_APPLICATION = "gestion_stock.asgi.application"
 
 # Optional Redis backend
+# settings.py
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [("redis-production-b899.up.railway.app", 6379)],
         },
     },
 }
