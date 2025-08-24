@@ -1003,19 +1003,20 @@ class VenteFaciliteDepotWordAPIView(APIView):
 
 
         # Remplir le contexte
+        # au lieu de passer la liste directement
         context = {
-            "vente_id": vente.id,
-            "client_nom": vente.client.nom_famille_ar,
-            "client_prenom": vente.client.prenom_ar,
-            "client_date_naissance":vente.client.date_naissance,
-            "client_lieu_naissance":vente.client.lieu_naissance,
-            "adresse":vente.client.adresse,
-            "utilisateur":vente.utilisateur.username,
-            "produits": produits_list,
-            "codes_barres": codes_barres_list,
-            "date_creation": vente.date_creation.strftime("%d/%m/%Y"),
-      
-        }
+    "vente_id": vente.id,
+    "client_nom": vente.client.nom_famille_ar,
+    "client_prenom": vente.client.prenom_ar,
+    "client_date_naissance": vente.client.date_naissance,
+    "client_lieu_naissance": vente.client.lieu_naissance,
+    "adresse": vente.client.adresse,
+    "utilisateur": vente.utilisateur.username,
+    "produits": produits_list,
+    "codes_barres": "- ".join(codes_barres_list),  # <-- joint avec espace
+    "date_creation": vente.date_creation.strftime("%d/%m/%Y"),
+}
+
 
         # Rendre le document
         doc.render(context)

@@ -74,16 +74,77 @@ class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
        instance.save()
 
 
+# class ExportProduitExcelView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         produit_resource = ProduitResource()
+#         dataset = produit_resource.export()
+#         response = HttpResponse(dataset.xlsx, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+#         response['Content-Disposition'] = 'attachment; filename="produits.xlsx"'
+#         return response
+from import_export import resources
+from import_export.formats.base_formats import XLSX
+from django.http import HttpResponse
+from .models import Produit
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+
+class ProduitResource(resources.ModelResource):
+    class Meta:
+        model = Produit
+        # Export all fields
+        fields = (
+            'id',
+            'reference',
+            'nom',
+            'famille',
+            'magasin',  # this will export the FK id
+            'marque',
+            'codes_barres',
+            'prix_achat',
+            'prix_vente_cache',
+            'prix_vente_3',
+            'prix_vente_5',
+            'prix_vente_6',
+            'prix_vente_8',
+            'prix_vente_9',
+            'prix_vente_10',
+            'prix_vente_12',
+            'prix_vente_15',
+            'quantite',
+            'taux_benefice_cache',
+            'taux_benefice_3',
+            'taux_benefice_5',
+            'taux_benefice_6',
+            'taux_benefice_8',
+            'taux_benefice_9',
+            'taux_benefice_10',
+            'taux_benefice_12',
+            'taux_benefice_15',
+            'date_creation',
+            'date_modification',
+            'est_supprime',
+        )
+
 class ExportProduitExcelView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         produit_resource = ProduitResource()
-        dataset = produit_resource.export()
-        response = HttpResponse(dataset.xlsx, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        dataset = produit_resource.export()  # returns tablib.Dataset
+
+        xlsx_format = XLSX()
+        data = xlsx_format.export_data(dataset)  # returns bytes
+
+        response = HttpResponse(
+            data,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
         response['Content-Disposition'] = 'attachment; filename="produits.xlsx"'
         return response
-    
+
+  
 class ImportProduitExcelView(APIView):
     permission_classes = [IsAuthenticated]
 

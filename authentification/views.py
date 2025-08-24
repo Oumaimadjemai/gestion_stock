@@ -162,20 +162,64 @@ class ClientRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ClientSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
+from import_export import resources
+from import_export.formats.base_formats import XLSX
+from .models import Client
+from django.http import HttpResponse
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+
+class ClientResource(resources.ModelResource):
+    class Meta:
+        model = Client
+        # Liste de tous les champs que tu veux exporter
+        fields = (
+            'id',
+            'assurance_militaire',
+            'date_expedition',
+            'nom_famille_ar',
+            'prenom_ar',
+            'nom_famille_fr',
+            'prenom_fr',
+            'nom_pere',
+            'nom_mere',
+            'numero_national',
+            'date_naissance',
+            'lieu_naissance',
+            'adresse',
+            'telephone',
+            'profession',
+            'revenu',
+            'type_piece_identite',
+            'numero_piece_identite',
+            'date_emission_piece',
+            'lieu_emission_piece',
+            'ccp',
+            'cle',
+            'code',
+            'dette_initiale',
+            'note',
+            'statut',
+            'bloque',
+            'date_creation',
+            'date_modification',
+            'jour',
+        )
 class ClientExportExcelView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         client_resource = ClientResource()
         dataset = client_resource.export()
-        export_data = XLSX().export_data(dataset)
-        
+        export_data = XLSX().export_data(dataset)  # génère le fichier Excel
+
         response = HttpResponse(
             export_data,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = "attachment; filename=clients.xlsx"
+        response["Content-Disposition"] = 'attachment; filename="clients.xlsx"'
         return response
+
     
 class ClientImportExcelView(APIView):
     parser_classes = [MultiPartParser]
@@ -220,20 +264,43 @@ class FournisseurRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView
     def perform_update(self, serializer):
         serializer.save()  # Logique supplémentaire possible lors de la mise à jour
 
+from import_export import resources
+from .models import Fournisseur
+
+class FournisseurResource(resources.ModelResource):
+    class Meta:
+        model = Fournisseur
+        # Tous les champs que tu veux exporter
+        fields = (
+            'id',
+            'nom',
+            'adresse',
+            'telephone',
+            'wilaya',
+            'dettes_initiales',
+            'date_creation',
+            'date_modification',
+        )
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from import_export.formats.base_formats import XLSX
+from django.http import HttpResponse
+
 class FournisseurExportExcelView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         fournisseur_resource = FournisseurResource()
-        dataset = fournisseur_resource.export()
-        export_data = XLSX().export_data(dataset)
+        dataset = fournisseur_resource.export()       # récupère les données
+        export_data = XLSX().export_data(dataset)    # convertit en XLSX
 
         response = HttpResponse(
             export_data,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = "attachment; filename=fournisseurs.xlsx"
+        response["Content-Disposition"] = 'attachment; filename="fournisseurs.xlsx"'
         return response
+
 
 
 class FournisseurImportExcelView(APIView):
