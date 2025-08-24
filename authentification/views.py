@@ -364,21 +364,14 @@ def download_fichier_client(request, pk):
     return HttpResponseRedirect(fichier.fichier.url)
 # views.py
 import os
+from dotenv import load_dotenv
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from openai import OpenAI
-from dotenv import load_dotenv
+import openai
 
-load_dotenv()  # loads the .env file
-
-HF_TOKEN = os.getenv("HF_API_KEY")  # must match your .env variable
-
-# Initialize the OpenAI-compatible client for Hugging Face
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=HF_TOKEN,
-)
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class ChatAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -389,16 +382,15 @@ class ChatAPIView(APIView):
             return Response({"error": "Message is required"}, status=400)
 
         try:
-            completion = client.chat.completions.create(
-                model="deepseek-ai/DeepSeek-V3.1:fireworks-ai",
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",  # Accessible model
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": user_message}
-                ],
+                ]
             )
-
-            answer = completion.choices[0].message.content
+            answer = response.choices[0].message.content
             return Response({"reply": answer})
 
-        except Exception as e:
+        except openai.OpenAIError as e:  # Correct exception
             return Response({"error": str(e)}, status=500)
