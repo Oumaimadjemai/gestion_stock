@@ -364,22 +364,26 @@ def download_fichier_client(request, pk):
     return HttpResponseRedirect(fichier.fichier.url)
 # views.py
 import os
+from dotenv import load_dotenv
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 import openai
 
+# Load .env variables
+load_dotenv()
+
+# Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class ChatAPIView(APIView):
-    permission_classes = [IsAuthenticated]  # optional
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         user_message = request.data.get("message")
         if not user_message:
             return Response({"error": "Message is required"}, status=400)
 
-        # New API usage
         response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
