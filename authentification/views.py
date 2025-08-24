@@ -363,13 +363,13 @@ def download_fichier_client(request, pk):
     # ✅ Cloudinary gives a direct URL
     return HttpResponseRedirect(fichier.fichier.url)
 # views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-import openai
 import os
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+import openai
 
-openai.api_key = os.getenv("OPENAI_API_KEY")  # safer to use env variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class ChatAPIView(APIView):
     permission_classes = [IsAuthenticated]  # optional
@@ -379,8 +379,8 @@ class ChatAPIView(APIView):
         if not user_message:
             return Response({"error": "Message is required"}, status=400)
 
-        # Call OpenAI Chat API
-        response = openai.ChatCompletion.create(
+        # New API usage
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
@@ -388,5 +388,5 @@ class ChatAPIView(APIView):
             ]
         )
 
-        answer = response['choices'][0]['message']['content']
+        answer = response.choices[0].message.content
         return Response({"reply": answer})
