@@ -689,30 +689,39 @@ class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAP
     def destroy(self, request, *args, **kwargs):
         """
         Suppression d'une vente avec rollback automatique en cas d'erreur
+        et restitution du stock produit.
         """
         instance = self.get_object()
 
         try:
-            # --- Exemple : actions avant suppression ---
-            # si tu veux mettre à jour le stock ou autre logique
-            # update_stock_on_delete(instance)
+            # 🔄 Restaurer les produits avant suppression
+            for ligne in instance.lignes.all():
+                produit = ligne.produit
 
-            # Supprimer la vente
+                # Restituer la quantité
+                produit.quantite += ligne.quantite
+
+                # Restituer les codes-barres
+                if ligne.codes_barres_utilises:
+                    produit.codes_barres = ligne.codes_barres_utilises + produit.codes_barres
+
+                produit.save()
+
+            # Ensuite, supprimer la vente (lignes supprimées automatiquement via CASCADE)
             self.perform_destroy(instance)
 
-            # Si tout se passe bien
             return Response(
-                {"success": "Vente supprimée avec succès"},
+                {"success": "Vente supprimée avec succès et stock restauré"},
                 status=status.HTTP_204_NO_CONTENT
             )
 
         except Exception as e:
-            # En cas d'erreur, la transaction est rollbackée automatiquement
             transaction.set_rollback(True)
             return Response(
                 {"error": f"Suppression annulée : {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
     @action(detail=True, methods=['post'])
     def payer_mensualite(self, request, pk=None):
         vente = self.get_object()
@@ -795,10 +804,54 @@ class VenteCacheListAPIView(generics.ListAPIView):
 
 
 
+from django.db import transaction
+from rest_framework.response import Response
+from rest_framework import status
+
 class VenteCacheDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = VenteCache.objects.all()
     serializer_class = VenteCacheSerializer
-    lookup_field = 'id'  # Or 'pk' if you prefer
+    lookup_field = 'id'
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        """
+        Suppression d'une vente au comptant avec rollback automatique
+        et restauration du stock produit.
+        """
+        instance = self.get_object()
+
+        try:
+            # 🔄 Restaurer le stock des produits
+            for ligne in instance.lignes.all():
+                produit = ligne.produit
+
+                # Restituer la quantité
+                produit.quantite += ligne.quantite
+
+                # Restituer les codes-barres
+                if ligne.codes_barres_utilises:
+                    produit.codes_barres = ligne.codes_barres_utilises + produit.codes_barres
+
+                produit.save()
+
+            # Supprimer la vente (les lignes sont supprimées en cascade)
+            self.perform_destroy(instance)
+
+            return Response(
+                {"success": "Vente supprimée avec succès et stock restauré"},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return Response(
+                {"error": f"Suppression annulée : {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+
 from docxtpl import DocxTemplate
 from django.http import HttpResponse
 from rest_framework.views import APIView

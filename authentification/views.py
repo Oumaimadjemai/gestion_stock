@@ -139,7 +139,7 @@ class ClientListCreateView(generics.ListCreateAPIView):
         return queryset
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
 
         total_clients = queryset.count()

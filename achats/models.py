@@ -42,4 +42,4 @@ class LigneAchat(models.Model):
     quantite = models.IntegerField()
     prix_achat = models.DecimalField(max_digits=10, decimal_places=2)
     magasin = models.ForeignKey(Magasin, on_delete=models.SET_NULL, null=True,blank=True)
-
+    nouveaux_codes_barres = models.JSONField(default=list, blank=True, null=True)
