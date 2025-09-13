@@ -571,10 +571,10 @@ class ImportPaiementsTxtAPIView(APIView):
             text_file = io.TextIOWrapper(f, encoding="utf-8")
             for line in text_file:
                 try:
-                    ccp = line[0:10].strip()
+                    ccp = line[2:10].strip()
                     name = line[10:35].strip()
                     montant_str = line[35:49].strip()
-                    date_str = line[49:59].strip()  # format DD/MM/YYYY
+                    date_str = line[53:63].strip()  # format DD/MM/YYYY
 
                     # Nettoyage du nom
                     if name.startswith("M."):
