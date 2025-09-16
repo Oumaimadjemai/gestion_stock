@@ -140,7 +140,7 @@ class ClientListCreateView(generics.ListCreateAPIView):
 
         return queryset
     
-    @method_decorator(cache_page(60 * 5))
+    
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
@@ -159,22 +159,13 @@ class FichierClientDeleteAPIView(generics.DestroyAPIView):
     queryset = FichierClient.objects.all()
     serializer_class = FichierClientSerializer
     permission_classes = [IsAuthenticated]
-    def perform_destroy(self, instance):
-        instance.delete()
-        cache.clear()  # ⚡ vide le cache après suppression fichier
+   
 
 class ClientRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
-    def perform_update(self, serializer):
-        instance = serializer.save()
-        cache.clear()  # ⚡ vide le cache après update
-        return instance
-
-    def perform_destroy(self, instance):
-        instance.delete()
-        cache.clear()  # ⚡ vide le cache après delete
+   
 
 from import_export import resources
 from import_export.formats.base_formats import XLSX
