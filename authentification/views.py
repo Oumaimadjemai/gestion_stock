@@ -19,7 +19,7 @@ from datetime import timedelta
 from django.db.models import Q
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-
+from django.core.cache import cache
 
 class RegisterAPIView(APIView):
     def post(self, request):
@@ -159,11 +159,22 @@ class FichierClientDeleteAPIView(generics.DestroyAPIView):
     queryset = FichierClient.objects.all()
     serializer_class = FichierClientSerializer
     permission_classes = [IsAuthenticated]
+    def perform_destroy(self, instance):
+        instance.delete()
+        cache.clear()  # ⚡ vide le cache après suppression fichier
 
 class ClientRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        cache.clear()  # ⚡ vide le cache après update
+        return instance
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        cache.clear()  # ⚡ vide le cache après delete
 
 from import_export import resources
 from import_export.formats.base_formats import XLSX

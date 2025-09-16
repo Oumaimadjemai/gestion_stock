@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from django.db.models import Sum, F, FloatField, ExpressionWrapper
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-
+from django.core.cache import cache
 class ProduitListCreateAPIView(generics.ListCreateAPIView):
     queryset = Produit.objects.filter(est_supprime=False)
     serializer_class = ProduitSerializer
@@ -60,6 +60,10 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
 class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Produit.objects.all()
     serializer_class = ProduitSerializer
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        cache.clear()  # ⚡ vide le cache après update
+        return instance
 
     def perform_destroy(self, instance):
        if instance.image:
@@ -72,6 +76,7 @@ class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
 
     # Mark as deleted in DB
        instance.delete()
+       cache.clear()
 
 from import_export import resources
 from import_export.formats.base_formats import XLSX
