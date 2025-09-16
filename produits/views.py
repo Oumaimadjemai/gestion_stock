@@ -10,7 +10,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, F, FloatField, ExpressionWrapper
-
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 
 class ProduitListCreateAPIView(generics.ListCreateAPIView):
     queryset = Produit.objects.filter(est_supprime=False)
@@ -28,7 +29,7 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         if famille:
             queryset = queryset.filter(famille=famille)
         return queryset
-
+    @method_decorator(cache_page(60 * 5))
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
