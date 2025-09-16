@@ -71,19 +71,8 @@ class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
             print(f"Error deleting Cloudinary image: {e}")
 
     # Mark as deleted in DB
-       instance.est_supprime = True
-       instance.save()
+       instance.delete()
 
-
-# class ExportProduitExcelView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         produit_resource = ProduitResource()
-#         dataset = produit_resource.export()
-#         response = HttpResponse(dataset.xlsx, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-#         response['Content-Disposition'] = 'attachment; filename="produits.xlsx"'
-#         return response
 from import_export import resources
 from import_export.formats.base_formats import XLSX
 from django.http import HttpResponse
@@ -196,7 +185,7 @@ class ProduitComparaisonView(APIView):
         magasins = list(Magasin.objects.all())
 
         # Base queryset
-        produits = Produit.objects.all()
+        produits = Produit.objects.filter(est_supprime=False)
 
         # Appliquer filtres
         if reference:
