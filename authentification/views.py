@@ -17,6 +17,8 @@ from rest_framework import generics, permissions
 from django.utils.timezone import now
 from datetime import timedelta
 from django.db.models import Q
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 
 
 class RegisterAPIView(APIView):
@@ -137,7 +139,8 @@ class ClientListCreateView(generics.ListCreateAPIView):
                 queryset = queryset.filter(date_creation__date__range=[start_date, end_date])
 
         return queryset
-
+    
+    @method_decorator(cache_page(60 * 5))
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         serializer = self.get_serializer(queryset, many=True)
