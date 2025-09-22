@@ -38,8 +38,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.username} ({self.role})"
     def has_feature(self, feature_name):
-        """Vérifie si un utilisateur a accès à une fonctionnalité donnée"""
-        return self.features.get(feature_name, False)
+        return feature_name in self.features
 
 
 
