@@ -29,7 +29,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=20, choices=ROLES)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-
+    features = models.JSONField(default=list, blank=True) 
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['role']
 
@@ -37,6 +37,9 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.username} ({self.role})"
+    def has_feature(self, feature_name):
+        """Vérifie si un utilisateur a accès à une fonctionnalité donnée"""
+        return self.features.get(feature_name, False)
 
 
 
