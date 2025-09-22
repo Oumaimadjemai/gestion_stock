@@ -138,7 +138,7 @@ class ClientListCreateView(generics.ListCreateAPIView):
             if start_date and end_date:
                 queryset = queryset.filter(date_creation__date__range=[start_date, end_date])
 
-        return queryset
+        return queryset.order_by("-date_creation")
     
     
     def list(self, request, *args, **kwargs):
