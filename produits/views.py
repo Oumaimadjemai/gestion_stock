@@ -29,26 +29,37 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         if famille:
             queryset = queryset.filter(famille=famille)
         return queryset
-    @method_decorator(cache_page(60 * 5))
+
+    
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
-        serializer = self.get_serializer(queryset, many=True)
 
-        # Calcul des totaux
+        # Calcul des totaux (toujours sur l’ensemble du queryset filtré)
         total_quantite = queryset.aggregate(Sum('quantite'))['quantite__sum'] or 0
-
         total_valeur = queryset.aggregate(
             total=Sum(
                 ExpressionWrapper(F('quantite') * F('prix_achat'), output_field=FloatField())
             )
         )['total'] or 0
-
         total_capital = queryset.aggregate(
             total=Sum(
                 ExpressionWrapper(F('quantite') * F('prix_vente_3'), output_field=FloatField())
             )
         )['total'] or 0
 
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
+            # injecter totaux dans la réponse paginée
+            response.data['totaux'] = {
+                'quantite': total_quantite,
+                'valeur_des_produits': total_valeur,
+                'capital': total_capital
+            }
+            return response
+
+        serializer = self.get_serializer(queryset, many=True)
         return Response({
             'produits': serializer.data,
             'totaux': {
@@ -57,6 +68,7 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
                 'capital': total_capital
             }
         })
+
 class ProduitRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Produit.objects.all()
     serializer_class = ProduitSerializer
