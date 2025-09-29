@@ -248,7 +248,7 @@ class FamillesProduitView(APIView):
     def get(self, request):
         familles = (
             Produit.objects
-            .values("famille")
+            .values("famille","reference")
             .annotate(
                 total_prix_achat=Sum("prix_achat"),
                 total_quantite=Sum("quantite")
