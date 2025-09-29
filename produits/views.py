@@ -28,7 +28,7 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
             queryset = queryset.filter(magasin_id=magasin)
         if famille:
             queryset = queryset.filter(famille=famille)
-        return queryset
+        return queryset.order_by('-date_creation')
 
     
     def list(self, request, *args, **kwargs):
