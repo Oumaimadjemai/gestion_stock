@@ -1,2 +1,9 @@
 [phases.setup]
-nixPkgs = ["python3", "postgresql_16.dev", "gcc", "pkg-config", "cairo"]
+aptPkgs = [
+  "libcairo2",
+  "libcairo2-dev",
+  "pkg-config",
+  "libpango1.0-dev",
+  "libgdk-pixbuf2.0-dev",
+  "libffi-dev"
+]
