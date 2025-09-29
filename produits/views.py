@@ -242,8 +242,16 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Produit
 
+from django.db.models import Sum
+
 class FamillesProduitView(APIView):
     def get(self, request):
-        familles = Produit.objects.values_list("famille", flat=True).distinct()
+        familles = (
+            Produit.objects
+            .values("famille")
+            .annotate(
+                total_prix_achat=Sum("prix_achat"),
+                total_quantite=Sum("quantite")
+            )
+        )
         return Response({"familles": list(familles)})
-
