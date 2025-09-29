@@ -236,3 +236,14 @@ class ProduitComparaisonView(APIView):
             })
 
         return Response(result)
+    
+    # views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import Produit
+
+class FamillesProduitView(APIView):
+    def get(self, request):
+        familles = Produit.objects.values_list("famille", flat=True).distinct()
+        return Response({"familles": list(familles)})
+

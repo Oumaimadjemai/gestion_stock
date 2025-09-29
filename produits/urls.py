@@ -7,4 +7,5 @@ urlpatterns = [
     path("produits/export-excel/", ExportProduitExcelView.as_view(), name="produits-export"),
     path("produits/import-excel/", ImportProduitExcelView.as_view(), name="produits-import"),
     path('comparaison/', ProduitComparaisonView.as_view(), name='produits-comparaison'),
+     path('produits/familles/', FamillesProduitView.as_view(), name='produits-familles'), 
 ]
