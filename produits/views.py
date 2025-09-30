@@ -255,3 +255,78 @@ class FamillesProduitView(APIView):
             )
         )
         return Response({"familles": list(familles)})
+
+# produits/views.py
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework import status
+import pandas as pd
+from .models import Produit
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def importer_prix_produits(request):
+    """
+    Upload Excel file to update products' prix_achat & prix_vente (3,5,8,10)
+    and calculate taux de bénéfice automatically.
+    Updates all products that have the same name.
+    """
+    fichier = request.FILES.get("file")
+    if not fichier:
+        return Response({"error": "Aucun fichier fourni"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        df = pd.read_excel(fichier)
+    except Exception as e:
+        return Response({"error": f"Erreur lecture fichier: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+    updated, not_found = [], []
+
+    for _, row in df.iterrows():
+        nom = str(row.get("الاسم")).strip()
+        if not nom:
+            continue
+
+        produits = Produit.objects.filter(nom=nom)
+        if not produits.exists():
+            not_found.append(nom)
+            continue
+
+        for produit in produits:
+            # Update prices
+            prix_achat = row.get("سعر الشراء") or produit.prix_achat
+            produit.prix_achat = prix_achat
+
+            prix_vente_3 = row.get("سعر 3") or produit.prix_vente_3
+            prix_vente_5 = row.get("سعر 5") or produit.prix_vente_5
+            prix_vente_8 = row.get("سعر 8") or produit.prix_vente_8
+            prix_vente_10 = row.get("سعر 10") or produit.prix_vente_10
+
+            produit.prix_vente_3 = prix_vente_3
+            produit.prix_vente_5 = prix_vente_5
+            produit.prix_vente_8 = prix_vente_8
+            produit.prix_vente_10 = prix_vente_10
+
+            # Calculate profit rates
+            def calc_taux(prix_vente, prix_achat):
+                if prix_achat and prix_achat > 0 and prix_vente:
+                    return round(((prix_vente - prix_achat) / prix_achat) * 100, 2)
+                return None
+
+            produit.taux_benefice_3 = calc_taux(prix_vente_3, prix_achat)
+            produit.taux_benefice_5 = calc_taux(prix_vente_5, prix_achat)
+            produit.taux_benefice_8 = calc_taux(prix_vente_8, prix_achat)
+            produit.taux_benefice_10 = calc_taux(prix_vente_10, prix_achat)
+
+            produit.save(update_fields=[
+                "prix_achat", "prix_vente_3", "prix_vente_5", "prix_vente_8", "prix_vente_10",
+                "taux_benefice_3", "taux_benefice_5", "taux_benefice_8", "taux_benefice_10"
+            ])
+            updated.append(produit.nom)
+
+    return Response({
+        "updated": updated,
+        "not_found": not_found,
+        "message": f"{len(updated)} produits mis à jour, {len(not_found)} introuvables"
+    }, status=status.HTTP_200_OK)

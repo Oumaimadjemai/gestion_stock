@@ -8,4 +8,5 @@ urlpatterns = [
     path("produits/import-excel/", ImportProduitExcelView.as_view(), name="produits-import"),
     path('comparaison/', ProduitComparaisonView.as_view(), name='produits-comparaison'),
      path('produits/familles/', FamillesProduitView.as_view(), name='produits-familles'), 
+     path("import-prix/", importer_prix_produits, name="import-prix"),
 ]

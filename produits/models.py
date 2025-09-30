@@ -107,7 +107,11 @@ class Produit(models.Model):
             self.taux_benefice_12, self.taux_benefice_15
         ]
         taux_valides = [t for t in taux if t is not None]
-        return sum(taux_valides) / len(taux_valides) if taux_valides else 0
+        # return sum(taux_valides) / len(taux_valides) if taux_valides else 0
+        if not taux_valides:
+            return 0
+        moyenne = sum(taux_valides)/len(taux_valides)
+        return float(round(moyenne,2))
 
     def save(self, *args, **kwargs):
         # ✅ Ne recalcule pas les prix, ils viennent du front
