@@ -53,7 +53,7 @@ def generate_valid_ean13_code():
 
 #     return nouveaux_codes
 import random
-from produits.models import Produit
+from django.apps import apps
 
 def generer_codes_barres_uniques(existants, nombre):
     """Génère `nombre` codes EAN13 uniques sans recharger toute la base."""
