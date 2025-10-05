@@ -104,7 +104,7 @@ class AchatGroupeListCreateAPIView(generics.ListCreateAPIView):
         if produit_id:
             queryset = queryset.filter(achats__produit_id=produit_id).distinct()
 
-        return queryset
+        return queryset.order_by('-date')
 
 from django.db import transaction
 from rest_framework.response import Response
