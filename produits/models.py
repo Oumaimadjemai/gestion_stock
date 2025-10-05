@@ -26,32 +26,64 @@ def generate_valid_ean13_code():
             return full_code
 
 
-def generer_codes_barres_uniques(existants, nombre):
-    """Génère `nombre` codes-barres EAN13 uniques, non présents dans `existants` ni dans la base."""
-    from produits.models import Produit  # Lazy import
+# def generer_codes_barres_uniques(existants, nombre):
+#     """Génère `nombre` codes-barres EAN13 uniques, non présents dans `existants` ni dans la base."""
+#     from produits.models import Produit  # Lazy import
 
+#     existants_set = set(existants or [])
+
+#     # Inclure tous les codes existants de la base
+#     for produit in Produit.objects.all().only("codes_barres"):
+#         if produit.codes_barres:
+#             existants_set.update(produit.codes_barres)
+
+#     nouveaux_codes = []
+#     essais = 0
+#     max_essais = nombre * 20
+
+#     while len(nouveaux_codes) < nombre and essais < max_essais:
+#         code = generate_valid_ean13_code()
+#         if code not in existants_set:
+#             nouveaux_codes.append(code)
+#             existants_set.add(code)
+#         essais += 1
+
+#     if len(nouveaux_codes) < nombre:
+#         raise Exception(f"Impossible de générer {nombre} codes-barres uniques après {max_essais} essais")
+
+#     return nouveaux_codes
+import random
+from produits.models import Produit
+
+def generer_codes_barres_uniques(existants, nombre):
+    """Génère `nombre` codes EAN13 uniques sans recharger toute la base."""
     existants_set = set(existants or [])
 
-    # Inclure tous les codes existants de la base
-    for produit in Produit.objects.all().only("codes_barres"):
-        if produit.codes_barres:
-            existants_set.update(produit.codes_barres)
+    # ⚡️ Charger seulement les codes barres existants une seule fois
+    tous_codes = Produit.objects.values_list("codes_barres", flat=True)
+    for codes in tous_codes:
+        if codes:
+            existants_set.update(codes)
 
-    nouveaux_codes = []
+    nouveaux_codes = set()
     essais = 0
-    max_essais = nombre * 20
+    max_essais = nombre * 50  # tolérance large
 
     while len(nouveaux_codes) < nombre and essais < max_essais:
-        code = generate_valid_ean13_code()
-        if code not in existants_set:
-            nouveaux_codes.append(code)
-            existants_set.add(code)
+        base = ''.join(str(random.randint(0, 9)) for _ in range(12))
+        pairs = [int(d) for d in base]
+        total = sum(pairs[i] if i % 2 == 0 else pairs[i] * 3 for i in range(12))
+        checksum = (10 - total % 10) % 10
+        code = base + str(checksum)
+
+        if code not in existants_set and code not in nouveaux_codes:
+            nouveaux_codes.add(code)
         essais += 1
 
     if len(nouveaux_codes) < nombre:
-        raise Exception(f"Impossible de générer {nombre} codes-barres uniques après {max_essais} essais")
+        raise ValueError(f"Impossible de générer {nombre} codes uniques après {max_essais} essais")
 
-    return nouveaux_codes
+    return list(nouveaux_codes)
 
 
 # --- Product Model ---
