@@ -27,7 +27,7 @@ class ProduitSerializer(serializers.ModelSerializer):
             'prix_vente_8', 'prix_vente_10',
             'quantite', 'date_creation',
             'date_modification', 'moyenne_pourcentage_facilite',
-            'nouveaux_codes_barres',
+            'nouveaux_codes_barres','est_supprime',
         ]
         extra_kwargs = {
             'magasin': {'write_only': True}
@@ -65,4 +65,4 @@ class ProduitSerializer(serializers.ModelSerializer):
 class ProduitMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = Produit
-        fields = ['id', 'reference', 'nom','codes_barres','quantite']
+        fields = ['id', 'reference', 'nom', 'codes_barres', 'quantite', 'est_supprime']
