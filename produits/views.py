@@ -330,3 +330,24 @@ def importer_prix_produits(request):
         "not_found": not_found,
         "message": f"{len(updated)} produits mis à jour, {len(not_found)} introuvables"
     }, status=status.HTTP_200_OK)
+# produits/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from .models import Produit
+
+class ResetQuantiteCodesBarresView(APIView):
+    """
+    Endpoint to reset all product quantities to 0 and remove all barcodes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Reset quantity and codes_barres for all products
+        updated_count = Produit.objects.update(quantite=0, codes_barres=[])
+        
+        return Response(
+            {"message": f"Quantities reset to 0 and barcodes deleted for {updated_count} products."},
+            status=status.HTTP_200_OK
+        )

@@ -9,4 +9,5 @@ urlpatterns = [
     path('comparaison/', ProduitComparaisonView.as_view(), name='produits-comparaison'),
      path('produits/familles/', FamillesProduitView.as_view(), name='produits-familles'), 
      path("import-prix/", importer_prix_produits, name="import-prix"),
+     path('reset-quantite-codes/', ResetQuantiteCodesBarresView.as_view(), name='reset-quantite-codes'),
 ]
