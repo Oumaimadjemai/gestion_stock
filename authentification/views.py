@@ -46,13 +46,13 @@ class CustomUserDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny
 from .models import CustomUser
 from .serializers import CustomUserSerializer
 
 class CustomUserListView(generics.ListAPIView):
     serializer_class = CustomUserSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
         role = self.request.query_params.get('role') or self.request.query_params.get('type')
