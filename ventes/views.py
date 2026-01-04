@@ -428,103 +428,133 @@ from rest_framework.response import Response
 from rest_framework import status
 from ventes.models import Client, VenteFacilite, PaiementVente  # adjust import as needed
 
+from datetime import datetime
+from decimal import Decimal
+from django.utils.timezone import make_aware
+from collections import defaultdict
+import io
+
 class ImportPaiementsTxtAPIView(APIView):
     """
     POST /vente/import-paiements-txt/
     Body: { "file": <fichier.txt> }
+    
+    Format du fichier (positions fixes):
+    00-01: Type d'enregistrement
+    02-09: CCP (8 caractères)
+    10-34: Nom (25 caractères)
+    35-48: Montant (14 caractères, format 000000XXXXX.00)
+    49-58: Date (10 caractères, format DD/MM/YYYY)
+    59-62: Code banque
+    63-68: Référence
     """
-
+    
     def validate_line_format(self, line):
         """Validate the line has minimum required length"""
-        return len(line) >= 63
-
+        # Nous avons besoin d'au moins 68 caractères pour toutes les données
+        return len(line) >= 68
+    
     def extract_fields(self, line):
         """Extract fields from a fixed-width line"""
-        # Based on the format: 
-        # CCP (8 chars): positions 2-9
-        # Name (25 chars): positions 10-34
-        # Amount (14 chars): positions 35-48 (includes .00 at the end)
-        # Date (10 chars): positions 49-58 (DD/MM/YYYY)
+        # Basé sur l'exemple: 0000189487M.BOUMEDIENE ABDELHADI     00000005700.0023/10/20250021027337011MUBHS062025033
         
-        ccp = line[2:10].strip()  # positions 2-9 (8 chars)
-        name = line[10:35].strip()  # positions 10-34 (25 chars)
-        montant_str = line[37:51].strip()  # positions 35-48 (14 chars)
-        date_str = line[51:61].strip()  # positions 49-58 (10 chars) - DD/MM/YYYY
-        return ccp, name, montant_str, date_str
-
+        # Extraire avec les positions exactes
+        record_type = line[0:2].strip()  # 00-01
+        ccp = line[2:10].strip()  # 02-09 (8 chars)
+        name = line[10:35].strip()  # 10-34 (25 chars)
+        montant_str = line[41:51].strip()  # 35-48 (14 chars)
+        date_str = line[51:61].strip()  # 49-58 (10 chars) - DD/MM/YYYY
+        bank_code = line[59:63].strip()  # 59-62
+        reference = line[63:68].strip()  # 63-67
+        
+        return {
+            'record_type': record_type,
+            'ccp': ccp,
+            'name': name,
+            'montant_str': montant_str,
+            'date_str': date_str,
+            'bank_code': bank_code,
+            'reference': reference
+        }
+    
     def parse_date(self, date_str):
-        """Parse date string DD/MM/YYYY and return month index (0-11)"""
+        """Parse date string DD/MM/YYYY and return datetime object"""
         try:
-            # Remove any extra characters/spaces
             date_str = date_str.strip()
             
-            # Check if date string has the correct format
+            # Validation de base
             if len(date_str) != 10:
-                raise ValueError(f"Longueur de date invalide: {date_str} ({len(date_str)} chars, attendu 10)")
+                raise ValueError(f"Longueur de date invalide: {date_str}")
             
-            # Check if the format is DD/MM/YYYY
             if date_str[2] != '/' or date_str[5] != '/':
-                # Try to find date pattern in the string
-                for i in range(len(date_str) - 9):
-                    if date_str[i+2] == '/' and date_str[i+5] == '/':
-                        # Found date pattern, extract it
-                        date_str = date_str[i:i+10]
-                        break
-                else:
-                    raise ValueError(f"Format de date invalide (pas de séparateurs '/'): {date_str}")
+                raise ValueError(f"Format de date invalide: {date_str}")
             
-            day = date_str[0:2]
-            month = date_str[3:5]
-            year = date_str[6:10]
+            # Extraire les parties
+            day = int(date_str[0:2])
+            month = int(date_str[3:5])
+            year = int(date_str[6:10])
             
-            # Validate numeric values
-            if not (day.isdigit() and month.isdigit() and year.isdigit()):
-                raise ValueError(f"Date contient des caractères non numériques: {date_str}")
+            # Validation des valeurs
+            if not (1 <= month <= 12):
+                raise ValueError(f"Mois invalide: {month}")
             
-            day_int = int(day)
-            month_int = int(month)
-            year_int = int(year)
+            if not (1 <= day <= 31):
+                raise ValueError(f"Jour invalide: {day}")
             
-            if month_int < 1 or month_int > 12:
-                raise ValueError(f"Mois invalide: {month_int}")
+            if not (2000 <= year <= 2100):
+                raise ValueError(f"Année invalide: {year}")
             
-            if day_int < 1 or day_int > 31:
-                raise ValueError(f"Jour invalide: {day_int}")
+            # Créer l'objet datetime
+            date_obj = datetime(year, month, day)
             
-            if year_int < 2000 or year_int > 2100:
-                raise ValueError(f"Année invalide (attendu 2000-2100): {year_int}")
+            # Rendre aware pour Django
+            aware_date = make_aware(date_obj)
             
-            # Return 0-based month index
-            return month_int - 1
+            return {
+                'datetime': aware_date,
+                'month_index': month - 1,  # 0-based pour month_index
+                'year': year,
+                'day': day
+            }
             
         except ValueError as e:
             raise ValueError(f"Erreur de parsing de date '{date_str}': {str(e)}")
         except Exception as e:
             raise ValueError(f"Erreur inattendue avec la date '{date_str}': {str(e)}")
-
+    
     def parse_montant(self, montant_str):
         """Parse amount string to Decimal"""
         try:
-            # Remove any leading zeros
+            # Exemple: "00000005700.00" → "5700.00" → Decimal("5700")
+            montant_str = montant_str.strip()
+            
+            # Supprimer les zéros en tête
             montant_str = montant_str.lstrip('0')
             
-            # If empty after removing zeros, it's 0
+            # Si vide après suppression, c'est 0
             if not montant_str:
                 return Decimal('0')
             
-            # If it ends with .00, remove it (common in this format)
+            # Si on a .00 à la fin, on peut l'enlever
             if montant_str.endswith('.00'):
                 montant_str = montant_str[:-3]
-                # If empty after removing .00, it's 0
+                # Si vide après, c'est 0
                 if not montant_str:
                     return Decimal('0')
             
-            # Convert to Decimal
-            return Decimal(montant_str)
+            # Convertir en Decimal
+            # On utilise quantize pour enlever les décimales si .00
+            amount = Decimal(montant_str)
+            
+            # Si c'est un nombre entier (comme dans votre exemple), retourner comme integer
+            if amount == amount.to_integral_value():
+                return Decimal(int(amount))
+            
+            return amount
             
         except Exception as e:
-            raise ValueError(f"Montant invalide: {montant_str} - {str(e)}")
-
+            raise ValueError(f"Montant invalide '{montant_str}': {str(e)}")
+    
     def handle_file(self, file_path):
         if not default_storage.exists(file_path):
             return {
@@ -532,18 +562,14 @@ class ImportPaiementsTxtAPIView(APIView):
                 "erreurs": [{"error": "Fichier introuvable"}],
                 "status": "error"
             }
-
+        
         paiements_effectues = []
         erreurs = []
         line_number = 0
-
-        # Grouping (ccp + month) -> total amount
-        grouped_paiements = defaultdict(Decimal)
-
-        # Debug: Log first few lines for analysis
-        debug_lines = []
         
-        # Open binary file and wrap as text
+        # Grouper par (ccp + date) → montant total
+        grouped_paiements = defaultdict(lambda: {'montant': Decimal('0'), 'date_info': None})
+        
         with default_storage.open(file_path, "rb") as f:
             text_file = io.TextIOWrapper(f, encoding="utf-8")
             
@@ -551,245 +577,261 @@ class ImportPaiementsTxtAPIView(APIView):
                 line_number += 1
                 original_line = line.rstrip('\n\r')
                 
-                # Debug: Capture first 5 lines
-                if line_number <= 5:
-                    debug_lines.append({
-                        "line": original_line,
-                        "length": len(original_line),
-                        "positions": {
-                            "ccp": original_line[2:10],
-                            "name": original_line[10:35],
-                            "amount": original_line[35:49],
-                            "date": original_line[49:59],
-                            "full_date_area": original_line[49:69]
-                        }
-                    })
+                # Ignorer les lignes vides
+                if not original_line.strip():
+                    continue
                 
                 try:
-                    # Validate line length
+                    # Validation de la longueur
                     if not self.validate_line_format(original_line):
                         erreurs.append({
-                            "ligne": original_line,
-                            "line_number": line_number,
-                            "error": f"Ligne trop courte ({len(original_line)} chars, minimum 63 requis)"
+                            "ligne": line_number,
+                            "error": f"Ligne trop courte ({len(original_line)} chars, minimum 68 requis)",
+                            "extrait": original_line[:100] + "..." if len(original_line) > 100 else original_line
                         })
                         continue
                     
-                    # Extract fields
-                    ccp, name, montant_str, date_str = self.extract_fields(original_line)
+                    # Extraire les champs
+                    fields = self.extract_fields(original_line)
                     
-                    # Validate required fields
-                    if not ccp:
+                    # Validation des champs requis
+                    if not fields['ccp']:
                         erreurs.append({
-                            "ligne": original_line,
-                            "line_number": line_number,
-                            "error": "CCP manquant ou vide"
+                            "ligne": line_number,
+                            "error": "CCP manquant ou vide",
+                            "extrait": original_line[:50]
                         })
                         continue
                     
-                    if not montant_str:
+                    if not fields['montant_str']:
                         erreurs.append({
-                            "ligne": original_line,
-                            "line_number": line_number,
-                            "error": "Montant manquant ou vide"
+                            "ligne": line_number,
+                            "error": "Montant manquant ou vide",
+                            "ccp": fields['ccp']
                         })
                         continue
                     
-                    if not date_str:
+                    if not fields['date_str']:
                         erreurs.append({
-                            "ligne": original_line,
-                            "line_number": line_number,
-                            "error": "Date manquante ou vide"
+                            "ligne": line_number,
+                            "error": "Date manquante ou vide",
+                            "ccp": fields['ccp']
                         })
                         continue
                     
-                    # Parse montant
+                    # Parser le montant
                     try:
-                        montant = self.parse_montant(montant_str)
+                        montant = self.parse_montant(fields['montant_str'])
                     except ValueError as e:
                         erreurs.append({
-                            "ligne": original_line,
-                            "line_number": line_number,
-                            "ccp": ccp,
-                            "montant_str": montant_str,
+                            "ligne": line_number,
+                            "ccp": fields['ccp'],
+                            "montant_str": fields['montant_str'],
                             "error": str(e)
                         })
                         continue
                     
-                    # Parse date to get month index
+                    # Parser la date
                     try:
-                        month_index = self.parse_date(date_str)
+                        date_info = self.parse_date(fields['date_str'])
                     except ValueError as e:
-                        # Try alternative approach: find date pattern in the line
-                        try:
-                            # Look for pattern DD/MM/YYYY in the line
-                            import re
-                            date_pattern = r'(\d{2}/\d{2}/\d{4})'
-                            match = re.search(date_pattern, original_line[35:])
-                            
-                            if match:
-                                alternative_date = match.group(1)
-                                month_index = self.parse_date(alternative_date)
-                            else:
-                                raise ValueError(f"Date non trouvée dans la ligne: {date_str}")
-                        except Exception as alt_e:
-                            erreurs.append({
-                                "ligne": original_line,
-                                "line_number": line_number,
-                                "ccp": ccp,
-                                "date_str": date_str,
-                                "extracted_positions": {
-                                    "amount_area": original_line[35:49],
-                                    "date_area": original_line[49:69]
-                                },
-                                "error": str(e)
-                            })
-                            continue
+                        erreurs.append({
+                            "ligne": line_number,
+                            "ccp": fields['ccp'],
+                            "date_str": fields['date_str'],
+                            "error": str(e)
+                        })
+                        continue
                     
-                    # Group par client+mois
-                    grouped_paiements[(ccp, month_index)] += montant
-
+                    # Clé de regroupement: ccp + date complète
+                    key = (fields['ccp'], date_info['datetime'].date())
+                    
+                    # Ajouter au groupe
+                    if key not in grouped_paiements or grouped_paiements[key]['date_info'] is None:
+                        grouped_paiements[key]['date_info'] = date_info
+                    
+                    grouped_paiements[key]['montant'] += montant
+                    
                 except Exception as e:
                     erreurs.append({
-                        "ligne": original_line,
-                        "line_number": line_number,
+                        "ligne": line_number,
+                        "extrait": original_line[:100],
                         "error": f"Erreur générale: {str(e)}"
                     })
-
-        # If there are parsing errors in many lines, stop early
-        if erreurs and len(erreurs) > 10:  # More than 10 errors
+        
+        # Si trop d'erreurs, arrêter
+        if erreurs and len(erreurs) > 20:
             return {
                 "paiements_effectues": [],
-                "erreurs": erreurs[:50],  # Limit to first 50 errors
-                "debug_lines": debug_lines,  # Include debug info
+                "erreurs": erreurs[:50],
                 "status": "error",
-                "message": f"Trop d'erreurs de parsing ({len(erreurs)}). Arrêt de l'import."
+                "message": f"Trop d'erreurs ({len(erreurs)}). Importation annulée."
             }
-
+        
         # Appliquer les paiements groupés
-        for (ccp, month_index), total_montant in grouped_paiements.items():
+        for (ccp, date_only), data in grouped_paiements.items():
             try:
-                # 1️⃣ Client
+                # 1️⃣ Trouver le client par CCP
                 try:
                     client = Client.objects.get(ccp=ccp)
                 except Client.DoesNotExist:
-                    erreurs.append({
-                        "ccp": ccp,
-                        "error": f"Client introuvable CCP={ccp}"
-                    })
-                    continue
-
-                # 2️⃣ Vente active
+                    # Essayer avec des zéros ajoutés (format 8 chiffres)
+                    ccp_8_digits = ccp.zfill(8)
+                    client = Client.objects.filter(ccp=ccp_8_digits).first()
+                    
+                    if not client:
+                        # Chercher par nom partiel (fallback)
+                        # Note: Cette partie dépend de votre logique métier
+                        raise Client.DoesNotExist(f"Client avec CCP {ccp} non trouvé")
+                
+                # 2️⃣ Trouver une vente active
                 vente = VenteFacilite.objects.filter(client=client, solde_regle=False).first()
                 if not vente:
                     erreurs.append({
-                        "client": client.id,
                         "ccp": ccp,
-                        "error": "Pas de vente active trouvée"
+                        "client": str(client),
+                        "date": date_only.isoformat(),
+                        "error": "Aucune vente active trouvée"
                     })
                     continue
-
-                # 3️⃣ Paiement
+                
+                # 3️⃣ Vérifier si un paiement existe déjà pour cette date
+                existing_payment = PaiementVente.objects.filter(
+                    vente=vente,
+                    date_paiement__date=date_only
+                ).first()
+                
+                if existing_payment:
+                    erreurs.append({
+                        "ccp": ccp,
+                        "client": str(client),
+                        "date": date_only.isoformat(),
+                        "error": f"Paiement existe déjà (ID: {existing_payment.id})"
+                    })
+                    continue
+                
+                # 4️⃣ Créer le paiement avec la date du fichier
+                date_info = data['date_info']
+                montant_total = data['montant']
+                
                 with transaction.atomic():
-                    PaiementVente.objects.create(
+                    paiement = PaiementVente.objects.create(
                         vente=vente,
-                        montant=total_montant,
-                        month_index=month_index,
+                        montant=montant_total,
+                        date_paiement=date_info['datetime'],  # Date du fichier
+                        month_index=date_info['month_index'],
                         status="paid",
-                        date_paiement=now()
+                        year=date_info['year']  # Optionnel: stocker l'année
                     )
-
-                    # Mise à jour de la vente (sans toucher mois_status)
-                    vente.montant_paye_effectif += total_montant
-                    vente.montant_restant = max(Decimal(0), vente.montant_restant - total_montant)
+                    
+                    # 5️⃣ Mettre à jour la vente
+                    vente.montant_paye_effectif += montant_total
+                    vente.montant_restant = max(Decimal('0'), vente.montant_restant - montant_total)
+                    
                     if vente.montant_restant == 0:
                         vente.solde_regle = True
-                    vente.last_payment_date = now().date()
+                    
+                    vente.last_payment_date = date_only
                     vente.save()
-
+                
                 paiements_effectues.append({
                     "client": str(client),
                     "ccp": ccp,
-                    "vente": vente.id,
-                    "paiement": str(total_montant),
-                    "mois": month_index + 1
+                    "vente_id": vente.id,
+                    "paiement_id": paiement.id,
+                    "montant": float(montant_total),
+                    "date_paiement": date_info['datetime'].isoformat(),
+                    "month": date_info['month_index'] + 1,  # 1-based pour l'affichage
+                    "year": date_info['year'],
+                    "day": date_info['day']
                 })
-
+                
+            except Client.DoesNotExist:
+                erreurs.append({
+                    "ccp": ccp,
+                    "date": date_only.isoformat() if 'date_only' in locals() else "N/A",
+                    "error": f"Client introuvable avec CCP: {ccp}"
+                })
             except Exception as e:
                 erreurs.append({
                     "ccp": ccp,
+                    "date": date_only.isoformat() if 'date_only' in locals() else "N/A",
                     "error": f"Erreur lors du traitement: {str(e)}"
                 })
-
+        
+        # Préparer la réponse
         result = {
-            "paiements_effectues": paiements_effectues, 
+            "paiements_effectues": paiements_effectues,
             "erreurs": erreurs,
-            "debug_info": debug_lines if debug_lines else None,
             "statistics": {
-                "total_lignes": line_number,
-                "paiements_importes": len(paiements_effectues),
+                "total_lignes_lues": line_number,
+                "paiements_crees": len(paiements_effectues),
                 "erreurs_total": len(erreurs),
-                "montant_total": str(sum(Decimal(p["paiement"]) for p in paiements_effectues)) if paiements_effectues else "0"
+                "montant_total": float(sum(data['montant'] for data in grouped_paiements.values())),
+                "clients_traites": len(set([p['ccp'] for p in paiements_effectues]))
             }
         }
         
-        # Add status
+        # Déterminer le statut
         if erreurs and not paiements_effectues:
             result["status"] = "error"
+            result["message"] = "Aucun paiement importé"
         elif erreurs and paiements_effectues:
             result["status"] = "partial"
+            result["message"] = f"{len(paiements_effectues)} paiements importés avec {len(erreurs)} erreurs"
         else:
             result["status"] = "success"
-            
+            result["message"] = f"Tous les {len(paiements_effectues)} paiements importés avec succès"
+        
         return result
-
+    
     def post(self, request, *args, **kwargs):
         file = request.FILES.get("file")
         if not file:
             return Response(
-                {"error": "Aucun fichier fourni", "status": "error"}, 
+                {"error": "Aucun fichier fourni", "status": "error"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        # Check file extension
+        
+        # Vérifier l'extension
         if not file.name.lower().endswith('.txt'):
             return Response(
                 {"error": "Le fichier doit être un fichier .txt", "status": "error"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        file_path = default_storage.save(file.name, file)
+        
+        # Limiter la taille du fichier (optionnel)
+        if file.size > 10 * 1024 * 1024:  # 10MB
+            return Response(
+                {"error": "Fichier trop volumineux (max 10MB)", "status": "error"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        file_path = default_storage.save(f"paiements_txt/{file.name}", file)
+        
         try:
             result = self.handle_file(file_path)
             
-            # Return appropriate HTTP status based on result
+            # Retourner le statut approprié
             if result.get("status") == "error":
-                return Response(
-                    result,
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
             elif result.get("status") == "partial":
-                return Response(
-                    result,
-                    status=status.HTTP_207_MULTI_STATUS
-                )
+                return Response(result, status=status.HTTP_207_MULTI_STATUS)
             else:
-                return Response(
-                    result,
-                    status=status.HTTP_201_CREATED
-                )
+                return Response(result, status=status.HTTP_201_CREATED)
                 
         except Exception as e:
-            return Response(
-                {
-                    "error": f"Erreur lors du traitement: {str(e)}",
-                    "status": "error"
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            import traceback
+            return Response({
+                "error": f"Erreur critique lors du traitement: {str(e)}",
+                "traceback": traceback.format_exc(),
+                "status": "error"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
+            # Nettoyer le fichier temporaire
             if default_storage.exists(file_path):
                 default_storage.delete(file_path)
+
 from django.db import transaction
 class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = VenteFacilite.objects.all()
@@ -1283,8 +1325,8 @@ class VenteFaciliteCCPWordAPIView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="ccp_{vente.id}.docx"'
         return response
- 
-    
+
+
 class DashboardPaiementsAPIView(APIView):
     def get(self, request):
         year = request.query_params.get("year")
@@ -1317,3 +1359,105 @@ class DashboardPaiementsAPIView(APIView):
 
         return Response(data)
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.db import transaction
+
+# Assumons que vous avez ce modèle
+from .models import PaiementVente
+
+@api_view(['DELETE', 'POST'])  # Supporte DELETE et POST
+@permission_classes([IsAuthenticated])
+def delete_all_payments(request):
+    """
+    Supprime TOUS les paiements de la base de données
+    """
+    try:
+        with transaction.atomic():
+            # Compter avant suppression
+            total_payments = PaiementVente.objects.count()
+            
+            # Supprimer tous les paiements
+            deleted_count, _ = PaiementVente.objects.all().delete()
+            
+            return Response({
+                'message': 'Tous les paiements ont été supprimés',
+                'paiements_supprimes': deleted_count,
+                'total_avant_suppression': total_payments,
+                'action': 'Toutes les lignes ont été supprimées de la table PaiementVente'
+            }, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        return Response({
+            'error': f'Erreur lors de la suppression: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def reset_all_ventes_to_initial(request):
+    """
+    Réinitialise TOUTES les ventes à l'état initial
+    """
+    try:
+        ventes = VenteFacilite.objects.all()
+        results = []
+        total_paiements_supprimes = 0
+        
+        for vente in ventes:
+            # Sauvegarder ancien état
+            ancien_verse = vente.montant_verse
+            ancien_restant = vente.montant_restant
+            
+            # Réinitialiser
+            vente.montant_verse = Decimal('0')
+            vente.montant_restant = vente.montant_total
+            
+            if hasattr(vente, 'montant_paye_effectif'):
+                vente.montant_paye_effectif = Decimal('0')
+            
+            if hasattr(vente, 'last_payment_date'):
+                vente.last_payment_date = None
+            
+            if hasattr(vente, 'solde_regle'):
+                vente.solde_regle = False
+            
+            vente.save()
+            
+            # Supprimer les paiements restants
+            paiements = PaiementVente.objects.filter(vente=vente)
+            paiements_count = paiements.count()
+            paiements.delete()
+            total_paiements_supprimes += paiements_count
+            
+            results.append({
+                'vente_id': vente.id,
+                'client': f"{vente.client.nom_famille_ar} {vente.client.prenom_ar}",
+                'ancien_montant_verse': float(ancien_verse),
+                'nouveau_montant_verse': 0,
+                'montant_total': float(vente.montant_total),
+                'montant_mensuel': float(vente.montant_mensuel)
+            })
+        
+        # Calculer les totaux
+        total_montant = sum(v.montant_total for v in ventes)
+        total_mensuel = sum(v.montant_mensuel for v in ventes)
+        
+        return Response({
+            'message': 'تمت إعادة تعيين جميع المبيعات',
+            'ventes_traitees': len(results),
+            'paiements_supprimes': total_paiements_supprimes,
+            'totaux': {
+                'المبلغ الإجمالي لجميع المبيعات': f'{total_montant} دج',
+                'المبلغ المدفوع الكلي': '0 دج',
+                'المبلغ المتبقي الكلي': f'{total_montant} دج',
+                'مجموع الأقساط الشهرية': f'{total_mensuel} دج'
+            },
+            'details': results[:10]  # Limiter à 10 pour éviter une réponse trop grande
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'error': f'Erreur: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -86,11 +86,12 @@ from django.utils.timezone import now
 class PaiementVente(models.Model):
     vente = models.ForeignKey("VenteFacilite", on_delete=models.CASCADE, related_name="paiements")
     montant = models.DecimalField(max_digits=10, decimal_places=0)
-    date_paiement = models.DateTimeField(default=now)
+    date_paiement = models.DateTimeField()
     
     # ✅ Add month and status
     month_index = models.PositiveSmallIntegerField(default=0,null=True,blank=True)  # 0-11 (Jan=0)
     status = models.CharField(max_length=20, default="pending")  # pending, paid, unpaid
+    year = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"Paiement {self.montant} pour {self.vente.client} mois {self.month_index+1}"

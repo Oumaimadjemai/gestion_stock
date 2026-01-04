@@ -22,4 +22,5 @@ urlpatterns = [
     path('admin/change-password/', AdminChangeUserPasswordView.as_view(), name='admin-change-password'),
     path('clients/files/<int:pk>/download/', download_fichier_client, name='download_fichier_client'),
      path('chat/', ChatAPIView.as_view(), name='chat'),
+      path('fix-ccp/',fix_ccp_numbers, name='fix-ccp'),
 ]

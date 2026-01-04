@@ -15,4 +15,6 @@ urlpatterns = [
     path('liste/', VenteCacheListAPIView.as_view(), name='liste-vente-cache'),
     path('ventes-cache/<int:id>/', VenteCacheDetailAPIView.as_view(), name='vente-cache-detail'),
     path('dashboard-paiements/',DashboardPaiementsAPIView.as_view(),name='dashboard-paiements'),
+    path('delete-payments/all/', delete_all_payments, name='delete-all-payments'),
+    path('ventes/reset-all-to-initial/', reset_all_ventes_to_initial, name='reset-all-ventes'),
 ]

@@ -470,3 +470,68 @@ class ChatAPIView(APIView):
 
         except openai.OpenAIError as e:  # Correct exception
             return Response({"error": str(e)}, status=500)
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.db.models import Q
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def fix_ccp_numbers(request):
+    """
+    Simple endpoint to fix CCP numbers:
+    - For 6-digit CCP: add '00' at the beginning
+    - For 7-digit CCP: add '0' at the beginning
+    - Already 8+ digits: keep as is
+    """
+    
+    # Get all clients with CCP numbers
+    clients = Client.objects.filter(
+        Q(ccp__isnull=False) & ~Q(ccp__exact='')
+    ).exclude(ccp='None')
+    
+    fixed_6_digit = 0
+    fixed_7_digit = 0
+    already_valid = 0
+    errors = []
+    
+    for client in clients:
+        ccp_clean = str(client.ccp).strip()
+        
+        # Skip if contains non-digits
+        if not ccp_clean.isdigit():
+            errors.append(f"Client ID {client.id}: Contains non-digit characters")
+            continue
+        
+        ccp_length = len(ccp_clean)
+        
+        if ccp_length == 6:
+            # Add '00' at the beginning
+            client.ccp = '00' + ccp_clean
+            client.save()
+            fixed_6_digit += 1
+            
+        elif ccp_length == 7:
+            # Add '0' at the beginning
+            client.ccp = '0' + ccp_clean
+            client.save()
+            fixed_7_digit += 1
+            
+        elif ccp_length >= 8:
+            already_valid += 1
+        else:  # ccp_length < 6
+            errors.append(f"Client ID {client.id}: Too short ({ccp_length} digits)")
+    
+    return Response({
+        'message': 'CCP numbers fixed successfully',
+        'summary': {
+            'total_clients_checked': clients.count(),
+            'fixed_6_digit': fixed_6_digit,
+            'fixed_7_digit': fixed_7_digit,
+            'already_valid': already_valid,
+            'errors_count': len(errors),
+        },
+        'errors': errors if errors else "No errors",
+    }, status=status.HTTP_200_OK)
