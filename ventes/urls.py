@@ -14,4 +14,5 @@ urlpatterns = [
      path('ventes-cache/', VenteCacheCreateAPIView.as_view(), name='ajouter-vente-cache'),
     path('liste/', VenteCacheListAPIView.as_view(), name='liste-vente-cache'),
     path('ventes-cache/<int:id>/', VenteCacheDetailAPIView.as_view(), name='vente-cache-detail'),
+    path('dashboard-paiements/',DashboardPaiementsAPIView.as_view(),name='dashboard-paiements'),
 ]
