@@ -1,34 +1,80 @@
 from rest_framework import serializers
 from .models import *
+from parametres.models import Magasin
+
 
 # class CustomUserSerializer(serializers.ModelSerializer):
+#     password = serializers.CharField(write_only=True)  # Important: write_only
+    
 #     class Meta:
 #         model = CustomUser
-#         fields = ('username','role')
-
-class CustomUserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)  # Important: write_only
+#         fields = ['username', 'password', 'role','id','features']
+#         extra_kwargs = {
+#             'password': {'write_only': True}
+#         }
     
+#     def create(self, validated_data):
+#         user = CustomUser.objects.create_user(
+#             username=validated_data['username'],
+#             password=validated_data['password'],
+#             role=validated_data['role']
+#         )
+#         return user
+class CustomUserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False)
+    magasin = serializers.PrimaryKeyRelatedField(
+        queryset=Magasin.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
     class Meta:
         model = CustomUser
-        fields = ['username', 'password', 'role','id','features']
+        fields = [
+            'id',
+            'username',
+            'password',
+            'role',
+            'magasin',
+            'features'
+        ]
         extra_kwargs = {
             'password': {'write_only': True}
         }
-    
+
+    def validate(self, attrs):
+        role = attrs.get('role', getattr(self.instance, 'role', None))
+        magasin = attrs.get('magasin', getattr(self.instance, 'magasin', None))
+
+        if role != 'admin' and not magasin:
+            raise serializers.ValidationError(
+                "Un vendeur ou magasinier doit être lié à un magasin."
+            )
+        return attrs
+
     def create(self, validated_data):
+        password = validated_data.pop('password', None)
+
         user = CustomUser.objects.create_user(
-            username=validated_data['username'],
-            password=validated_data['password'],
-            role=validated_data['role']
+            password=password,
+            **validated_data
         )
         return user
 
-# class FichierClientSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = FichierClient
-#         fields = ['id', 'fichier']
-from rest_framework import serializers
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if password:
+            instance.set_password(password)
+
+        instance.save()
+        return instance
+
+
+
 from .models import FichierClient
 
 class FichierClientSerializer(serializers.ModelSerializer):
