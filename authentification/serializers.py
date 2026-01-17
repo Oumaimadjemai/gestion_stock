@@ -22,11 +22,16 @@ from parametres.models import Magasin
 #         return user
 class CustomUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
+
+    # 👉 écriture : id du magasin
     magasin = serializers.PrimaryKeyRelatedField(
         queryset=Magasin.objects.all(),
         required=False,
         allow_null=True
     )
+
+    # 👉 lecture : détails magasin
+    magasin_detail = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = CustomUser
@@ -36,11 +41,21 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'password',
             'role',
             'magasin',
+            'magasin_detail',
             'features'
         ]
         extra_kwargs = {
             'password': {'write_only': True}
         }
+
+    def get_magasin_detail(self, obj):
+        if obj.magasin:
+            return {
+                "id": obj.magasin.id,
+                "nom": obj.magasin.nom,
+                "adresse": obj.magasin.adresse,
+            }
+        return None
 
     def validate(self, attrs):
         role = attrs.get('role', getattr(self.instance, 'role', None))
