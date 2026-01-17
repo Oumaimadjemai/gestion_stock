@@ -21,16 +21,28 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.core.cache import cache
 
+# class RegisterAPIView(APIView):
+#     def post(self, request):
+#         serializer = CustomUserSerializer(data=request.data)
+#         if serializer.is_valid():
+#             user = CustomUser.objects.create_user(
+#                 username=serializer.validated_data['username'],
+#                 password=serializer.validated_data['password'],
+#                 role=serializer.validated_data['role']
+#             )
+#             return Response({'message': 'Utilisateur créé avec succès.'}, status=status.HTTP_201_CREATED)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 class RegisterAPIView(APIView):
     def post(self, request):
         serializer = CustomUserSerializer(data=request.data)
+
         if serializer.is_valid():
-            user = CustomUser.objects.create_user(
-                username=serializer.validated_data['username'],
-                password=serializer.validated_data['password'],
-                role=serializer.validated_data['role']
+            serializer.save()  # 🔥 THIS IS THE KEY
+            return Response(
+                {'message': 'Utilisateur créé avec succès.'},
+                status=status.HTTP_201_CREATED
             )
-            return Response({'message': 'Utilisateur créé avec succès.'}, status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 from rest_framework import generics
