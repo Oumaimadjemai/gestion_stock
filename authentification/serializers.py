@@ -68,13 +68,19 @@ class CustomUserSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        password = validated_data.pop('password', None)
+      password = validated_data.pop('password', None)
+      magasin = validated_data.pop('magasin', None)
 
-        user = CustomUser.objects.create_user(
-            password=password,
-            **validated_data
-        )
-        return user
+      user = CustomUser.objects.create_user(
+        password=password,
+        **validated_data
+    )
+
+      if magasin:
+        user.magasin = magasin
+        user.save()
+
+      return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
