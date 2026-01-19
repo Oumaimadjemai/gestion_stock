@@ -24,8 +24,8 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         queryset = super().get_queryset()
         magasin = self.request.query_params.get('magasin')
         famille = self.request.query_params.get('famille')
-        if magasin:
-            queryset = queryset.filter(magasin_id=magasin)
+        if magasin and magasin != "null":
+            queryset = queryset.filter(magasin_id=int(magasin))
         if famille:
             queryset = queryset.filter(famille=famille)
         return queryset.order_by('-date_creation')
