@@ -21,7 +21,7 @@ from parametres.models import Magasin
 #         )
 #         return user
 class CustomUserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True)
 
     # 👉 écriture : id du magasin
     magasin = serializers.PrimaryKeyRelatedField(
@@ -69,19 +69,20 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
       password = validated_data.pop('password', None)
-      magasin = validated_data.pop('magasin', None)
-
+    
+    # Extract role and other fields
+      role = validated_data.get('role')
+    
       user = CustomUser.objects.create_user(
+        username=validated_data.get('username'),
         password=password,
-        **validated_data
+        role=role,  # Pass role explicitly
+        magasin=validated_data.get('magasin', None),
+        features=validated_data.get('features', []),
+        is_active=validated_data.get('is_active', True)
     )
-
-      if magasin:
-        user.magasin = magasin
-        user.save()
-
+    
       return user
-
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
 
