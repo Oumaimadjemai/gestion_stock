@@ -39,8 +39,18 @@ class AchatGroupeListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = AchatGroupeSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['fournisseur', 'date','produit']
+    filterset_fields = ['fournisseur', 'date']
     search_fields = ['fournisseur__nom', 'achats__produit__nom']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # ✅ Filter by product ID if provided (through related achats)
+        produit_id = self.request.query_params.get('produit')
+        if produit_id:
+            queryset = queryset.filter(achats__produit_id=produit_id).distinct()
+        
+        return queryset
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
