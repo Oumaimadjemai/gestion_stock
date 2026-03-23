@@ -39,7 +39,7 @@ class AchatGroupeListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = AchatGroupeSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['fournisseur', 'date']
+    filterset_fields = ['fournisseur', 'date','produit']
     search_fields = ['fournisseur__nom', 'achats__produit__nom']
 
     def list(self, request, *args, **kwargs):
