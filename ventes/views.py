@@ -1374,44 +1374,55 @@ class VenteFaciliteDepotWordAPIView(APIView):
 
     def get(self, request, pk):
         try:
-            vente = VenteFacilite.objects.prefetch_related('lignes', 'client','utilisateur').get(pk=pk)
+            vente = VenteFacilite.objects.prefetch_related('lignes', 'client', 'utilisateur', 'magasin').get(pk=pk)
         except VenteFacilite.DoesNotExist:
             return Response({"error": "Vente non trouvée"}, status=404)
 
-        # Charger le template ACTE.docx
-        template_path = Path(settings.BASE_DIR) / "templates_word" / "DEPOT.docx" # chemin vers ton modèle
+        # Charger le template DEPOT.docx
+        template_path = Path(settings.BASE_DIR) / "templates_word" / "DEPOT.docx"
         doc = DocxTemplate(template_path)
 
-        # Construire la liste des produits
+        # Construire la liste des produits avec le bon magasin
         produits_list = []
         for ligne in vente.lignes.all():
+            # Get the magasin name from the sale's magasin if available, or from product's magasins
+            magasin_nom = "N/A"
+            
+            # First try to get from the sale's magasin
+            if vente.magasin:
+                magasin_nom = vente.magasin.nom
+            else:
+                # If not, try to find from product's magasins list
+                if hasattr(ligne.produit, 'magasins') and ligne.produit.magasins:
+                    # magasins is a list of dicts like [{'id': 1, 'nom': 'Magasin Name', ...}]
+                    if isinstance(ligne.produit.magasins, list) and len(ligne.produit.magasins) > 0:
+                        magasin_nom = ligne.produit.magasins[0].get('nom', 'N/A')
+            
             produits_list.append({
                 "designation": ligne.produit.nom,
                 "prix": ligne.sous_total,
-                "magasin": ligne.produit.magasin.nom,
+                "magasin": magasin_nom,  # Fixed: Now using magasin_nom instead of ligne.produit.magasin.nom
             })
+        
+        # Collect all barcodes
         codes_barres_list = []
-
         for ligne in vente.lignes.all():
-    # Ajouter tous les codes-barres de cette ligne à la liste globale
-            codes_barres_list.extend(ligne.codes_barres_utilises or [])
-
+            if ligne.codes_barres_utilises:
+                codes_barres_list.extend(ligne.codes_barres_utilises)
 
         # Remplir le contexte
-        # au lieu de passer la liste directement
         context = {
-    "vente_id": vente.id,
-    "client_nom": vente.client.nom_famille_ar,
-    "client_prenom": vente.client.prenom_ar,
-    "client_date_naissance": vente.client.date_naissance,
-    "client_lieu_naissance": vente.client.lieu_naissance,
-    "adresse": vente.client.adresse,
-    "utilisateur": vente.utilisateur.username,
-    "produits": produits_list,
-    "codes_barres": "- ".join(codes_barres_list),  # <-- joint avec espace
-    "date_creation": vente.date_creation.strftime("%d/%m/%Y"),
-}
-
+            "vente_id": vente.id,
+            "client_nom": vente.client.nom_famille_ar,
+            "client_prenom": vente.client.prenom_ar,
+            "client_date_naissance": vente.client.date_naissance,
+            "client_lieu_naissance": vente.client.lieu_naissance,
+            "adresse": vente.client.adresse,
+            "utilisateur": vente.utilisateur.username,
+            "produits": produits_list,
+            "codes_barres": "- ".join(codes_barres_list) if codes_barres_list else "Aucun code barres",
+            "date_creation": vente.date_creation.strftime("%d/%m/%Y"),
+        }
 
         # Rendre le document
         doc.render(context)
@@ -1423,7 +1434,6 @@ class VenteFaciliteDepotWordAPIView(APIView):
         response['Content-Disposition'] = f'attachment; filename="DEPOT_{vente.id}.docx"'
         doc.save(response)
         return response
-
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
