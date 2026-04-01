@@ -29,9 +29,17 @@ class CustomUserSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    
+    # 👉 écriture : ids des magasins accessibles
+    magasins_acces = serializers.PrimaryKeyRelatedField(
+        queryset=Magasin.objects.all(),
+        many=True,
+        required=False
+    )
 
     # 👉 lecture : détails magasin
     magasin_detail = serializers.SerializerMethodField(read_only=True)
+    magasins_acces_detail = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = CustomUser
@@ -42,6 +50,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'role',
             'magasin',
             'magasin_detail',
+            'magasins_acces',
+            'magasins_acces_detail',
+            'magasin_access_type',
             'features'
         ]
         extra_kwargs = {
@@ -56,46 +67,71 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 "adresse": obj.magasin.adresse,
             }
         return None
+    
+    def get_magasins_acces_detail(self, obj):
+        return [
+            {
+                "id": mag.id,
+                "nom": mag.nom,
+                "adresse": mag.adresse,
+            }
+            for mag in obj.magasins_acces.all()
+        ]
 
     def validate(self, attrs):
         role = attrs.get('role', getattr(self.instance, 'role', None))
         magasin = attrs.get('magasin', getattr(self.instance, 'magasin', None))
+        magasin_access_type = attrs.get('magasin_access_type', getattr(self.instance, 'magasin_access_type', 'assigned_only'))
+        magasins_acces = attrs.get('magasins_acces', [])
 
-        if role != 'admin' and not magasin:
-            raise serializers.ValidationError(
-                "Un vendeur ou magasinier doit être lié à un magasin."
-            )
+        if role != 'admin':
+            # For non-admin users, they must have at least one magasin assigned
+            if magasin_access_type == 'assigned_only' and not magasin:
+                raise serializers.ValidationError(
+                    "Un vendeur ou magasinier avec accès uniquement au magasin assigné doit avoir un magasin assigné."
+                )
+            if magasin_access_type == 'selected_magasins' and not magasins_acces:
+                raise serializers.ValidationError(
+                    "Un vendeur ou magasinier avec accès à des magasins sélectionnés doit avoir au moins un magasin sélectionné."
+                )
+        
         return attrs
 
     def create(self, validated_data):
-      password = validated_data.pop('password', None)
+        password = validated_data.pop('password', None)
+        magasins_acces = validated_data.pop('magasins_acces', [])
+        
+        user = CustomUser.objects.create_user(
+            username=validated_data.get('username'),
+            password=password,
+            role=validated_data.get('role'),
+            magasin=validated_data.get('magasin', None),
+            magasin_access_type=validated_data.get('magasin_access_type', 'assigned_only'),
+            features=validated_data.get('features', []),
+            is_active=validated_data.get('is_active', True)
+        )
+        
+        # Add accessible magasins
+        if magasins_acces:
+            user.magasins_acces.set(magasins_acces)
+        
+        return user
     
-    # Extract role and other fields
-      role = validated_data.get('role')
-    
-      user = CustomUser.objects.create_user(
-        username=validated_data.get('username'),
-        password=password,
-        role=role,  # Pass role explicitly
-        magasin=validated_data.get('magasin', None),
-        features=validated_data.get('features', []),
-        is_active=validated_data.get('is_active', True)
-    )
-    
-      return user
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
+        magasins_acces = validated_data.pop('magasins_acces', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
         if password:
             instance.set_password(password)
+        
+        if magasins_acces is not None:
+            instance.magasins_acces.set(magasins_acces)
 
         instance.save()
         return instance
-
-
 
 from .models import FichierClient
 

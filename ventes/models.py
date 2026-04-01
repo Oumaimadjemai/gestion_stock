@@ -9,6 +9,7 @@ from django.db.models import DecimalField, Sum
 User = get_user_model()
 class VenteFacilite(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, verbose_name="الزبون")
+    magasin = models.ForeignKey(Magasin, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المخزن")
     date_debut = models.DateField()
     date_fin = models.DateField()
     nombre_mois = models.PositiveIntegerField()
@@ -25,6 +26,14 @@ class VenteFacilite(models.Model):
     solde_regle = models.BooleanField(default=False)
     class Meta:
         ordering=['-id']
+        indexes=[
+            models.Index(fields=['date_creation']),
+            models.Index(fields=['client']),
+            models.Index(fields=['utilisateur']),
+            models.Index(fields=['magasin']),
+            models.Index(fields=['montant_total']), 
+
+        ]
     def save(self, *args, **kwargs):
         # Initialize month statuses if empty
         if not self.mois_status or len(self.mois_status) != self.nombre_mois:
@@ -70,7 +79,12 @@ class LigneVenteFacilite(models.Model):
     prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)
     sous_total = models.DecimalField(max_digits=10, decimal_places=2)
     codes_barres_utilises = models.JSONField(default=list, blank=True)
-
+    stock_snapshot = models.JSONField(null=True, blank=True)
+    class Meta:
+        indexes = [
+            models.Index(fields=['vente']),
+            models.Index(fields=['produit']),
+        ]
 
     def save(self, *args, **kwargs):
         self.sous_total = self.quantite * self.prix_unitaire
@@ -102,7 +116,7 @@ class VenteCache(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, verbose_name="الزبون")
     utilisateur = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المستخدم")
     date_vente = models.DateTimeField(auto_now_add=True)
-
+    magasin = models.ForeignKey(Magasin, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المخزن") 
     montant_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
@@ -123,5 +137,31 @@ class LigneVenteCache(models.Model):
 
     def __str__(self):
         return f"{self.produit.nom} x {self.quantite}"
+    
+
+# ventes/models.py - Add this new model
+
+class AppSettings(models.Model):
+    """
+    Application settings model
+    """
+    name = models.CharField(max_length=100, unique=True)
+    value = models.BooleanField(default=False)
+    description = models.TextField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Modifié par"
+    )
+    
+    class Meta:
+        verbose_name = "Paramètre"
+        verbose_name_plural = "Paramètres"
+    
+    def __str__(self):
+        return f"{self.name}: {self.value}"
     
 

@@ -3,11 +3,12 @@ from .views import *
 
 urlpatterns = [
     path('ventes-facilite/', VenteFaciliteCreateAPIView.as_view()),
-    path('ventes-facilite/<int:pk>/', VenteFaciliteRetrieveUpdateDestroyAPIView.as_view()),
+   path('ventes-facilite/<int:pk>/', VenteFaciliteDetailAPIView.as_view(), name='vente-facilite-detail'),
     path("vente/payer/<int:pk>/", VentePaiementAPIView.as_view(), name="vente-payer"),
     path("vente/import-paiements-txt/", ImportPaiementsTxtAPIView.as_view(), name="import-paiements-txt"),
     path('ventes-facilite/<int:pk>/acte/word/', VenteFaciliteActeWordAPIView.as_view(), name='vente-facilite-acte-word'),
     path('ventes-facilite/<int:pk>/bon/word/', VenteFaciliteBonWordAPIView.as_view(), name='vente-facilite-bon-word'),
+    path('ventes-facilite/stats/', VenteFaciliteSimpleStatsAPIView.as_view(), name='vente-facilite-stats'),
     path('ventes-cache/<int:pk>/bon/word/', VenteCashBonWordAPIView.as_view(), name='vente-cash-bon-word'),
      path('ventes-facilite/<int:pk>/depot/word/', VenteFaciliteDepotWordAPIView.as_view(), name='vente-facilite-depot-word'),
     path("ventes-facilite/<int:pk>/ccp/word/", VenteFaciliteCCPWordAPIView.as_view(), name="vente-facilite-ccp-word",),
@@ -17,4 +18,5 @@ urlpatterns = [
     path('dashboard-paiements/',DashboardPaiementsAPIView.as_view(),name='dashboard-paiements'),
     path('delete-payments/all/', delete_all_payments, name='delete-all-payments'),
     path('ventes/reset-all-to-initial/', reset_all_ventes_to_initial, name='reset-all-ventes'),
+     path('settings/', AppSettingsAPIView.as_view(), name='app-settings'),
 ]

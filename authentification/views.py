@@ -53,26 +53,23 @@ from .serializers import CustomUserSerializer
 class CustomUserDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
-    permission_classes = [IsAuthenticated]
     lookup_field = 'id'  # or 'pk'
 
 
+from django.contrib.auth import get_user_model
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated,AllowAny
-from .models import CustomUser
 from .serializers import CustomUserSerializer
+from rest_framework.permissions import IsAuthenticated,AllowAny
+
+User = get_user_model()
 
 class CustomUserListView(generics.ListAPIView):
     serializer_class = CustomUserSerializer
-    permission_classes = [AllowAny]
+    
 
     def get_queryset(self):
-        role = self.request.query_params.get('role') or self.request.query_params.get('type')
-        queryset = CustomUser.objects.all()
-        if role:
-            queryset = queryset.filter(role__iexact=role.strip())  # ignore case & spaces
-        return queryset
-
+        # Limit to only necessary fields and order by id
+        return CustomUser.objects.only('id', 'username', 'role', 'magasin_id').order_by('id')
 
 # login
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -44,10 +44,30 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         related_name="users",
         verbose_name="Magasin"
     )
+    # New field for multiple magasins access
+    magasins_acces = models.ManyToManyField(
+        Magasin,
+        blank=True,
+        related_name="users_with_access",
+        verbose_name="Magasins accessibles"
+    )
     role = models.CharField(max_length=20, choices=ROLES)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    features = models.JSONField(default=list, blank=True) 
+    features = models.JSONField(default=list, blank=True)
+    # New field: access type for magasins
+    MAGASIN_ACCESS_TYPES = [
+        ('assigned_only', 'Magasin assigné uniquement'),
+        ('all_magasins', 'Tous les magasins'),
+        ('selected_magasins', 'Magasins sélectionnés'),
+    ]
+    magasin_access_type = models.CharField(
+        max_length=20,
+        choices=MAGASIN_ACCESS_TYPES,
+        default='assigned_only',
+        verbose_name="Type d'accès aux magasins"
+    )
+    
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['role']
 
@@ -55,10 +75,43 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.username} ({self.role})"
+    
     def has_feature(self, feature_name):
         return feature_name in self.features
-
-
+    
+    def can_access_magasin(self, magasin_id):
+        """Check if user can access a specific magasin"""
+        if self.role == 'admin':
+            return True
+        if self.magasin_access_type == 'all_magasins':
+            return True
+        if self.magasin_access_type == 'assigned_only':
+            return self.magasin_id == magasin_id
+        if self.magasin_access_type == 'selected_magasins':
+            return self.magasins_acces.filter(id=magasin_id).exists()
+        return False
+    
+    def get_accessible_magasins(self):
+        """Get list of magasins the user can access"""
+        if self.role == 'admin':
+            return Magasin.objects.all()
+        if self.magasin_access_type == 'all_magasins':
+            return Magasin.objects.all()
+        if self.magasin_access_type == 'assigned_only' and self.magasin:
+            return Magasin.objects.filter(id=self.magasin.id)
+        if self.magasin_access_type == 'selected_magasins':
+            return self.magasins_acces.all()
+        return Magasin.objects.none()
+    def get_full_name(self):
+        """Return the full name of the user"""
+        return self.username  # Or combine first/last name if you have those fields
+    
+    def get_short_name(self):
+        """Return the short name of the user"""
+        return self.username
+    
+    def has_feature(self, feature_name):
+        return feature_name in self.features
 
 TYPE_PIECE_IDENTITE = [
     ('بطاقة التعريف الوطنية ', 'بطاقة التعريف الوطنية / Carte d\'identité'),

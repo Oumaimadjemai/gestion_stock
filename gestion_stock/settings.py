@@ -33,14 +33,24 @@ SECRET_KEY = config("SECRET_KEY", default="unsafe-secret-key")
 DEBUG = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = ["gestionstock-production.up.railway.app", "localhost", "127.0.0.1"]
 
+# settings.py - Corrected database configuration
+
+
+# Database
 DATABASES = {
-    'default': dj_database_url.parse(
-        config("DATABASE_URL"),
+    'default': dj_database_url.config(
+        default=config("DATABASE_URL"),
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=True,
     )
 }
 
+# For PostgreSQL-specific optimizations, you need to modify the config after parsing
+if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':
+    DATABASES['default']['OPTIONS'] = {
+        'connect_timeout': 10,
+        'options': '-c statement_timeout=30s -c idle_in_transaction_session_timeout=30s',
+    }
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': config("CLOUDINARY_STORAGE_CLOUD_NAME"),
     'API_KEY': config("CLOUDINARY_STORAGE_API_KEY"),
@@ -51,6 +61,7 @@ CLOUDINARY_STORAGE = {
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -75,8 +86,61 @@ INSTALLED_APPS = [
     'notes',
     'cloudinary',
     'cloudinary_storage',
-    
+    'common',
+    'django_redis',
+    'debug_toolbar',
+    'channels',
+    'chat',
+    'stats',
+    'inventaire',
 ]
+# settings.py - Fixed Redis configuration
+# Redis Configuration (Hosted on Railway)
+REDIS_HOST = 'junction.proxy.rlwy.net'
+REDIS_PORT = 41907
+REDIS_PASSWORD = 'dVZwODtckOEHIVQHTZQQjRzMgqfFzaAW'
+
+# Channel Layers for WebSockets
+ASGI_APPLICATION = "gestion_stock.asgi.application"
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+# CHANNEL_LAYERS = {
+#     'default': {
+#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#         'CONFIG': {
+#             "hosts": [("junction.proxy.rlwy.net", 41907, "dVZwODtckOEHIVQHTZQQjRzMgqfFzaAW")],
+#         },
+#     },
+# }
+# Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'CONNECTION_POOL_CLASS': 'redis.BlockingConnectionPool',
+            'CONNECTION_POOL_CLASS_KWARGS': {
+                'max_connections': 50,
+                'timeout': 20,
+            },
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'RETRY_ON_TIMEOUT': True,
+            'MAX_CONNECTIONS': 1000,
+        },
+        'KEY_PREFIX': 'gestion_stock',
+        'TIMEOUT': 300,
+    }
+}
+
+
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
 AUTH_USER_MODEL = 'authentification.CustomUser'
 CORS_ALLOW_ALL_ORIGINS = True
 import cloudinary
@@ -101,6 +165,8 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 MIDDLEWARE = [
+    'debug_toolbar.middleware.DebugToolbarMiddleware',  
+    # 'django.middleware.cache.UpdateCacheMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -110,8 +176,12 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-
+    'common.middleware.CacheInvalidationMiddleware',
+    # 'django.middleware.cache.FetchFromCacheMiddleware', 
+     'common.middleware.PerformanceMiddleware',
 ]
+CACHE_MIDDLEWARE_SECONDS = 300
+CACHE_MIDDLEWARE_KEY_PREFIX = 'gestion_stock'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -124,7 +194,7 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 75, 
+    'PAGE_SIZE': 20, 
 }
 
 ROOT_URLCONF = 'gestion_stock.urls'
@@ -240,3 +310,19 @@ CORS_ALLOWED_ORIGINS = [
 ]
  # For development only, restrict in production
 CORS_ALLOW_CREDENTIALS = True
+
+# settings.py
+import os
+from b2sdk.v2 import *
+
+# Backblaze B2 Configuration
+B2_ACCOUNT_ID = "3677f4f8e220"
+B2_APPLICATION_KEY = "0037af877052a9cb3d985739482953dfdefefe2fa8"
+B2_BUCKET_NAME = "darlokman"  # You'll need to create this bucket
+
+# File upload settings
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+
+# Media files (for local development)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

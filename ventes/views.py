@@ -22,7 +22,21 @@ from rest_framework.decorators import action
 
 
 
-from django.db.models import Count, Sum, F, DecimalField, IntegerField, Value, Q
+from django.db.models import Count, Sum, F, DecimalField, IntegerField, Value, Q, Prefetch
+from django.db.models.functions import Coalesce
+from decimal import Decimal
+from rest_framework import generics, filters
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import VenteFacilite, LigneVenteFacilite
+from .serializers import VenteFaciliteSerializer
+from .filters import VenteFaciliteFilter
+from django.core.cache import cache
+from django.db import connection
+import time
+
+
+from django.db.models import Count, Sum, F, DecimalField, IntegerField, Value, Q, Prefetch
 from django.db.models.functions import Coalesce
 from decimal import Decimal
 from rest_framework import generics, filters
@@ -31,14 +45,25 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import VenteFacilite
 from .serializers import VenteFaciliteSerializer
 from .filters import VenteFaciliteFilter
+from django.core.cache import cache
+
+
+from django.db.models import Count, Sum
+from decimal import Decimal
+from rest_framework import generics, filters
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import VenteFacilite
+from .serializers import VenteFaciliteListSerializer, VenteFaciliteDetailSerializer
+from .filters import VenteFaciliteFilter
+from django.db import connection
+import time
+
 
 class VenteFaciliteCreateAPIView(generics.ListCreateAPIView):
-    queryset = VenteFacilite.objects.all().select_related('client', 'utilisateur').order_by('-id')
-    serializer_class = VenteFaciliteSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = VenteFaciliteFilter
 
-    # ✅ Search client by any name or CCP
     search_fields = [
         'client__nom_famille_fr',
         'client__prenom_fr',
@@ -48,106 +73,85 @@ class VenteFaciliteCreateAPIView(generics.ListCreateAPIView):
         'client__cle'
     ]
 
+    def get_serializer_class(self):
+        """Use minimal serializer for list, full serializer for create"""
+        if self.request.method == 'GET':
+            return VenteFaciliteMinimalSerializer
+        return VenteFaciliteSerializer  # ✅ Use the full serializer for POST
+
+    def get_queryset(self):
+        """Get only the fields needed for list view"""
+        if self.request.method == 'GET':
+            return VenteFacilite.objects.select_related(
+                'client', 'utilisateur', 'magasin'
+            ).only(
+                'id', 'date_creation', 'montant_total', 'montant_verse',
+                'montant_restant', 'montant_mensuel', 'nombre_mois',
+                'client__id', 'client__nom_famille_ar', 'client__prenom_ar',
+                'client__nom_famille_fr', 'client__prenom_fr',
+                'utilisateur__id', 'utilisateur__username',
+                'magasin__id', 'magasin__nom'
+            ).order_by('-id')
+        
+        return VenteFacilite.objects.all()
+
     def list(self, request, *args, **kwargs):
+        """Optimized list method"""
+        import time
+        start_time = time.time()
+        
         queryset = self.filter_queryset(self.get_queryset())
+        
+        total_ventes = queryset.count()
+        total_montant_total = queryset.aggregate(Sum('montant_total'))['montant_total__sum'] or 0
+        total_montant_verse = queryset.aggregate(Sum('montant_verse'))['montant_verse__sum'] or 0
+        total_montant_restant = queryset.aggregate(Sum('montant_restant'))['montant_restant__sum'] or 0
+        
+        page = self.paginate_queryset(queryset)
+        
+        execution_time = time.time() - start_time
+        print(f"✅ Query + Serialization: {execution_time:.2f} seconds")
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response_data = {
+                "ventes": serializer.data,
+                "total_ventes": total_ventes,
+                "total_montant_total": total_montant_total,
+                "total_montant_verse": total_montant_verse,
+                "total_montant_restant": total_montant_restant,
+            }
+            return self.get_paginated_response(response_data)
+        
         serializer = self.get_serializer(queryset, many=True)
-
-        # ✅ Base stats
-        stats = queryset.aggregate(
-            total_ventes=Count('id'),
-            total_montant_total=Coalesce(
-                Sum('montant_total', output_field=DecimalField()),
-                Value(0, output_field=DecimalField())
-            ),
-            total_montant_verse=Coalesce(
-                Sum('montant_verse', output_field=DecimalField()),
-                Value(0, output_field=DecimalField())
-            ),
-            total_montant_restant=Coalesce(
-                Sum('montant_restant', output_field=DecimalField()),
-                Value(0, output_field=DecimalField())
-            ),
-        )
-
-        # ✅ Calcul du coût d'achat total
-        cout_achat_total = queryset.aggregate(
-            total_achat=Coalesce(
-                Sum(
-                    F('lignes__quantite') * F('lignes__produit__prix_achat'),
-                    output_field=DecimalField()
-                ),
-                Value(0, output_field=DecimalField())
-            )
-        )['total_achat'] or Decimal('0')
-
-        # ✅ Bénéfice total = Montant ventes - coût d'achat
-        total_montant_total = stats['total_montant_total'] or Decimal('0')
-        benefice_total = total_montant_total - cout_achat_total
-
-        # ✅ Pourcentage bénéfice = (bénéfice / coût d'achat) * 100
-        pourcentage_benefice = (
-            (benefice_total / cout_achat_total * 100)
-            if cout_achat_total > 0
-            else 0
-        )
-
-        # ✅ Extra stats pour produit sélectionné
-        produit_id = request.query_params.get('produit')
-        quantite_vendue = 0
-        montant_total_produit = 0
-        benefice_produit = 0
-        pourcentage_benefice_produit = 0
-
-        if produit_id:
-            produit_stats = queryset.aggregate(
-                quantite_vendue=Coalesce(
-                    Sum(
-                        'lignes__quantite',
-                        filter=Q(lignes__produit_id=produit_id),
-                        output_field=IntegerField()
-                    ),
-                    Value(0, output_field=IntegerField())
-                ),
-                montant_total_produit=Coalesce(
-                    Sum(
-                        'lignes__sous_total',
-                        filter=Q(lignes__produit_id=produit_id),
-                        output_field=DecimalField()
-                    ),
-                    Value(0, output_field=DecimalField())
-                ),
-                cout_achat_produit=Coalesce(
-                    Sum(
-                        F('lignes__quantite') * F('lignes__produit__prix_achat'),
-                        filter=Q(lignes__produit_id=produit_id),
-                        output_field=DecimalField()
-                    ),
-                    Value(0, output_field=DecimalField())
-                )
-            )
-
-            quantite_vendue = produit_stats['quantite_vendue'] or 0
-            montant_total_produit = produit_stats['montant_total_produit'] or 0
-            cout_achat_produit = produit_stats['cout_achat_produit'] or Decimal('0')
-
-            benefice_produit = montant_total_produit - cout_achat_produit
-            pourcentage_benefice_produit = (
-                (benefice_produit / cout_achat_produit * 100)
-                if cout_achat_produit > 0 else 0
-            )
-
-        return Response({
+        response_data = {
             "ventes": serializer.data,
-            **stats,
-            "quantite_vendue_produit": quantite_vendue,
-            "montant_total_produit": montant_total_produit,
-            "cout_achat_total": cout_achat_total,
-            "benefice_total": benefice_total,
-            "pourcentage_benefice_total": round(pourcentage_benefice, 2),
-            "benefice_produit": benefice_produit,
-            "pourcentage_benefice_produit": round(pourcentage_benefice_produit, 2),
+            "total_ventes": total_ventes,
+            "total_montant_total": total_montant_total,
+            "total_montant_verse": total_montant_verse,
+            "total_montant_restant": total_montant_restant,
+        }
+        
+        return Response(response_data)
+class VenteFaciliteDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """Use separate serializer for detail view"""
+    queryset = VenteFacilite.objects.all().select_related('client', 'utilisateur', 'magasin')
+    serializer_class = VenteFaciliteDetailSerializer
+# Optional: Simple stats endpoint (can be removed if not needed)
+class VenteFaciliteSimpleStatsAPIView(generics.GenericAPIView):
+    """Simple stats endpoint - returns only basic counts"""
+    
+    def get(self, request):
+        """Return simple stats without heavy calculations"""
+        
+        # Basic counts - very fast
+        total_ventes = VenteFacilite.objects.count()
+        total_montant = VenteFacilite.objects.aggregate(Sum('montant_total'))['montant_total__sum'] or 0
+        
+        return Response({
+            "total_ventes": total_ventes,
+            "total_montant": total_montant,
         })
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -833,33 +837,225 @@ class ImportPaiementsTxtAPIView(APIView):
                 default_storage.delete(file_path)
 
 from django.db import transaction
+# Update the destroy methods to work with the new magasins structure
+
+from django.db import transaction
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
 class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = VenteFacilite.objects.all()
-    serializer_class = VenteFaciliteSerializer
+    serializer_class = VenteFaciliteDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Check if force deletion is requested (skip stock restoration)
+        force_delete = request.query_params.get('force', False)
+        
+        restored_products = []
+        failed_products = []
+        restored_ids = set()
+
+        try:
+            print(f"\n🗑️ Deleting sale #{instance.id}")
+            if force_delete:
+                print("⚠️ FORCE DELETE MODE: Stock will NOT be restored")
+            
+            # Get all lines for this sale
+            lignes = instance.lignes.select_related('produit').all()
+            
+            if not force_delete:
+                # Restore each product's stock from snapshot
+                for ligne in lignes:
+                    produit = ligne.produit
+                    
+                    if not produit:
+                        failed_products.append({
+                            "line_id": ligne.id,
+                            "error": "Product not found"
+                        })
+                        continue
+                        
+                    if produit.id in restored_ids:
+                        continue
+                    
+                    snapshot = ligne.stock_snapshot
+                    
+                    if not snapshot:
+                        failed_products.append({
+                            "produit_id": produit.id,
+                            "produit_nom": produit.nom,
+                            "error": "Stock snapshot missing"
+                        })
+                        continue
+                    
+                    try:
+                        print(f"🔄 Restoring product: {produit.nom}")
+                        
+                        # FULL RESTORE from snapshot
+                        produit.magasins = snapshot.get("magasins", [])
+                        
+                        if "codes_barres" in snapshot:
+                            produit.codes_barres = snapshot.get("codes_barres", [])
+                        
+                        # Also restore original quantity if it was stored in snapshot
+                        if "quantite_totale" in snapshot:
+                            produit.quantite_totale = snapshot.get("quantite_totale", 0)
+                        
+                        # Alternative: calculate from magasins
+                        if not produit.quantite_totale and produit.magasins:
+                            total_quantity = 0
+                            for mag in produit.magasins:
+                                total_quantity += len(mag.get('codes_barres', []))
+                            produit.quantite_totale = total_quantity
+                        
+                        produit.save()
+                        
+                        restored_products.append({
+                            "id": produit.id,
+                            "nom": produit.nom,
+                            "quantite_restauree": produit.quantite_totale
+                        })
+                        
+                        restored_ids.add(produit.id)
+                        print(f"✅ Restored: {produit.nom} (Qty: {produit.quantite_totale})")
+                        
+                    except Exception as restore_error:
+                        failed_products.append({
+                            "produit_id": produit.id,
+                            "produit_nom": produit.nom,
+                            "error": str(restore_error)
+                        })
+                        print(f"❌ Failed to restore {produit.nom}: {restore_error}")
+                
+                # If we have failed products and not forcing, raise error
+                if failed_products and not force_delete:
+                    error_msg = f"Cannot delete sale: {len(failed_products)} product(s) failed to restore"
+                    print(f"❌ {error_msg}")
+                    raise Exception(error_msg, {"failed_products": failed_products})
+            
+            # Delete all payment records
+            paiements = instance.paiements.all()
+            if paiements.exists():
+                print(f"🗑️ Deleting {paiements.count()} payment records...")
+                paiements_count = paiements.count()
+                paiements.delete()
+                print(f"✅ Deleted {paiements_count} payment records")
+            
+            # Delete the sale instance
+            print(f"🗑️ Deleting sale #{instance.id}...")
+            self.perform_destroy(instance)
+            print(f"✅ Sale #{instance.id} deleted successfully")
+            
+            response_data = {
+                "success": True,
+                "message": "Vente supprimée avec succès",
+                "restored_products": restored_products,
+                "total_restored": len(restored_products)
+            }
+            
+            if failed_products:
+                response_data["warning"] = "Some products could not be restored"
+                response_data["failed_products"] = failed_products
+                response_data["force_deleted"] = True
+            
+            return Response(response_data, status=status.HTTP_204_NO_CONTENT)
+            
+        except Exception as e:
+            # Rollback is automatically handled by @transaction.atomic
+            print(f"\n❌ ERROR during sale deletion: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            error_response = {
+                "error": str(e),
+                "success": False,
+                "restored_products": restored_products,
+                "failed_products": failed_products
+            }
+            
+            # Add stack trace for debugging in development
+            if settings.DEBUG:
+                import traceback
+                error_response["traceback"] = traceback.format_exc()
+            
+            return Response(
+                error_response,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+from django.db import transaction
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework import generics
+from .models import VenteCache
+from .serializers import VenteCacheSerializer
+from produits.models import Produit
+from parametres.models import Magasin
+
+
+class VenteCacheDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = VenteCache.objects.all()
+    serializer_class = VenteCacheSerializer
+    lookup_field = 'id'
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         """
-        Suppression d'une vente avec rollback automatique en cas d'erreur
-        et restitution du stock produit.
+        Suppression d'une vente au comptant avec rollback automatique et restitution du stock.
         """
         instance = self.get_object()
 
         try:
-            # 🔄 Restaurer les produits avant suppression
+            # Get the magasin from the sale record
+            sale_magasin = instance.magasin
+            
+            if not sale_magasin:
+                return Response(
+                    {"error": "Le magasin n'est pas spécifié pour cette vente"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Restaurer le stock des produits
             for ligne in instance.lignes.all():
                 produit = ligne.produit
-
-                # Restituer la quantité
-                produit.quantite += ligne.quantite
-
-                # Restituer les codes-barres
-                if ligne.codes_barres_utilises:
-                    produit.codes_barres = ligne.codes_barres_utilises + produit.codes_barres
-
+                magasin_id = sale_magasin.id
+                codes_to_restore = ligne.codes_barres_utilises or []
+                
+                if not codes_to_restore:
+                    continue
+                
+                # Find if the product already has this magasin in its magasins array
+                magasin_index = -1
+                for i, mag in enumerate(produit.magasins or []):
+                    if mag.get('id') == magasin_id:
+                        magasin_index = i
+                        break
+                
+                if magasin_index == -1:
+                    # Create new magasin entry
+                    produit.magasins.append({
+                        'id': magasin_id,
+                        'nom': sale_magasin.nom,
+                        'adresse': getattr(sale_magasin, 'adresse', ''),
+                        'codes_barres': codes_to_restore
+                    })
+                else:
+                    # Add codes to existing magasin
+                    current_codes = produit.magasins[magasin_index].get('codes_barres', [])
+                    # Add restored codes to the beginning or end? 
+                    # Adding to the beginning to maintain order
+                    produit.magasins[magasin_index]['codes_barres'] = codes_to_restore + current_codes
+                
+                # Sync product to update global codes_barres
+                produit._sync_quantite()
                 produit.save()
 
-            # Ensuite, supprimer la vente (lignes supprimées automatiquement via CASCADE)
+            # Delete the sale (cascade will delete lines)
             self.perform_destroy(instance)
 
             return Response(
@@ -873,44 +1069,39 @@ class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAP
                 {"error": f"Suppression annulée : {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-    @action(detail=True, methods=['post'])
-    def payer_mensualite(self, request, pk=None):
-        vente = self.get_object()
-        montant_paye = vente.effectuer_paiement_mensuel()
-        if montant_paye > 0:
-            return Response({
-                "message": f"Paiement de {montant_paye} effectué",
-                "montant_restant": vente.montant_restant,
-                "montant_verse": vente.montant_verse,
-                "last_payment_date": vente.last_payment_date,
-                "dette_totale_client": vente.dette_totale_client,
-                "dette_actuelle_client": vente.dette_actuelle_client
-            })
-        return Response({"message": "Vente déjà totalement payée"}, status=status.HTTP_400_BAD_REQUEST)
-
 class VenteCacheCreateAPIView(generics.CreateAPIView):
     queryset = VenteCache.objects.all()
     serializer_class = VenteCacheSerializer
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Get magasin_id from request data or query params
+        magasin_id = self.request.data.get('magasin_id') or self.request.query_params.get('magasin_id')
+        if magasin_id:
+            context['magasin_id'] = magasin_id
+        return context
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 class VenteCacheListAPIView(generics.ListAPIView):
-    queryset = VenteCache.objects.all()
+    queryset = VenteCache.objects.all().select_related('client', 'utilisateur', 'magasin')
     serializer_class = VenteCacheSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = VenteCacheFilter
 
-    # search client by any name
     search_fields = [
-    'client__nom_famille_fr',
-    'client__prenom_fr',
-    'client__nom_famille_ar',
-    'client__prenom_ar',
-    'client__ccp',
-    'client__cle'
-]
-
+        'client__nom_famille_fr',
+        'client__prenom_fr',
+        'client__nom_famille_ar',
+        'client__prenom_ar',
+        'client__ccp',
+        'client__cle'
+    ]
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -951,8 +1142,7 @@ class VenteCacheListAPIView(generics.ListAPIView):
             "ventes": serializer.data,
             "quantite_vendue_produit": quantite_vendue,
             "montant_total_produit": montant_total_produit
-        })
-   
+        })   
 
 
 
@@ -960,47 +1150,47 @@ from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import status
 
-class VenteCacheDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = VenteCache.objects.all()
-    serializer_class = VenteCacheSerializer
-    lookup_field = 'id'
+# class VenteCacheDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+#     queryset = VenteCache.objects.all()
+#     serializer_class = VenteCacheSerializer
+#     lookup_field = 'id'
 
-    @transaction.atomic
-    def destroy(self, request, *args, **kwargs):
-        """
-        Suppression d'une vente au comptant avec rollback automatique
-        et restauration du stock produit.
-        """
-        instance = self.get_object()
+#     @transaction.atomic
+#     def destroy(self, request, *args, **kwargs):
+#         """
+#         Suppression d'une vente au comptant avec rollback automatique
+#         et restauration du stock produit.
+#         """
+#         instance = self.get_object()
 
-        try:
-            # 🔄 Restaurer le stock des produits
-            for ligne in instance.lignes.all():
-                produit = ligne.produit
+#         try:
+#             # 🔄 Restaurer le stock des produits
+#             for ligne in instance.lignes.all():
+#                 produit = ligne.produit
 
-                # Restituer la quantité
-                produit.quantite += ligne.quantite
+#                 # Restituer la quantité
+#                 produit.quantite += ligne.quantite
 
-                # Restituer les codes-barres
-                if ligne.codes_barres_utilises:
-                    produit.codes_barres = ligne.codes_barres_utilises + produit.codes_barres
+#                 # Restituer les codes-barres
+#                 if ligne.codes_barres_utilises:
+#                     produit.codes_barres = ligne.codes_barres_utilises + produit.codes_barres
 
-                produit.save()
+#                 produit.save()
 
-            # Supprimer la vente (les lignes sont supprimées en cascade)
-            self.perform_destroy(instance)
+#             # Supprimer la vente (les lignes sont supprimées en cascade)
+#             self.perform_destroy(instance)
 
-            return Response(
-                {"success": "Vente supprimée avec succès et stock restauré"},
-                status=status.HTTP_204_NO_CONTENT
-            )
+#             return Response(
+#                 {"success": "Vente supprimée avec succès et stock restauré"},
+#                 status=status.HTTP_204_NO_CONTENT
+#             )
 
-        except Exception as e:
-            transaction.set_rollback(True)
-            return Response(
-                {"error": f"Suppression annulée : {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+#         except Exception as e:
+#             transaction.set_rollback(True)
+#             return Response(
+#                 {"error": f"Suppression annulée : {str(e)}"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
 
 
 
@@ -1234,15 +1424,34 @@ class VenteFaciliteDepotWordAPIView(APIView):
         doc.save(response)
         return response
 
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.conf import settings
+from django.http import HttpResponse
+import io
+from pathlib import Path
+from docx import Document
+
+from .models import VenteFacilite
+
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.conf import settings
+from django.http import HttpResponse
+import io
+from pathlib import Path
+from docx import Document
+
+from .models import VenteFacilite
+
+
 class VenteFaciliteCCPWordAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        import io
-        from pathlib import Path
-        from docx import Document
-        from django.http import HttpResponse
-
         try:
             vente = (
                 VenteFacilite.objects
@@ -1259,62 +1468,104 @@ class VenteFaciliteCCPWordAPIView(APIView):
         template_path = Path(settings.BASE_DIR) / "templates_word" / "ccp.docx"
         doc = Document(template_path)
 
-        def remplir_ligne_cases(table, row_index, texte, is_ccp=False, cle=""):
-            """
-            Remplit une ligne lettre par lettre.
-            Si is_ccp=True -> remplit CCP et place la clé dans les 2 dernières cellules
-            """
-            texte = str(texte).upper()
+        def remplir_ligne_cases(table, row_index, texte, is_ccp=False, cle="", align_right=False):
+            texte = str(texte)
             cells = table.rows[row_index].cells
             total_cells = len(cells)
 
-            # Effacer la ligne sauf la 1ère colonne (libellé)
+            # Clear row (except label column)
             for i in range(1, total_cells):
                 for paragraph in cells[i].paragraphs:
                     for run in paragraph.runs:
                         run.text = ""
 
-            # Index de la dernière colonne pour la clé
+            # =========================
+            # ✅ FIXED POSITIONING LOGIC
+            # =========================
+            if align_right and not is_ccp:
+                chars = list(texte)
+
+                # 🔥 Start from 3rd last cell
+                start_col = total_cells - 3
+
+                for i, char in enumerate(reversed(chars)):
+                    col_index = start_col - i
+                    if col_index >= 1:  # avoid first label column
+                        cells[col_index].paragraphs[0].add_run(char)
+
+                return  # VERY IMPORTANT → stop here
+
+            # =========================
+            # NORMAL LEFT → RIGHT
+            # =========================
             if is_ccp:
-                cle_cols = [total_cells - 2, total_cells - 1]  # 2 dernières colonnes
-                data_cells = range(1, total_cells - 2)        # cellules pour CCP
+                cle_cols = [total_cells - 2, total_cells - 1]
+                data_cells = list(range(1, total_cells - 2))
             else:
                 cle_cols = []
-                data_cells = range(1, total_cells)
+                data_cells = list(range(1, total_cells))
 
-            # Remplissage CCP / texte normal
             letter_idx = 0
             for i in data_cells:
                 if letter_idx < len(texte):
                     cells[i].paragraphs[0].add_run(texte[letter_idx])
                     letter_idx += 1
 
-            # Si CCP -> remplir la clé dans les 2 dernières colonnes
+            # CCP key
             if is_ccp and cle:
-                cle = cle.upper().ljust(2)[:2]  # Forcer 2 caractères max
+                cle = cle.upper().ljust(2)[:2]
                 for idx, col in enumerate(cle_cols):
                     if idx < len(cle):
                         cells[col].paragraphs[0].add_run(cle[idx])
 
-        # Format nombre_mois sur 2 chiffres
+        # Format months
         nb_mois = vente.nombre_mois or 0
         echeances = f"{nb_mois:02}"
 
-        # Données CCP
+        # CCP data
         ccp_number = str(vente.client.ccp or "")
         cle_number = str(vente.client.cle or "")
 
-        # Remplir les deux premières tables
+        # Format amount
+        try:
+            prelevement_float = float(prelevement)
+            montant_formatted = f"{prelevement_float:.2f}".replace(".", ",")
+        except:
+            montant_formatted = f"{prelevement},00"
+
+        # Fill tables
         for table in doc.tables[:2]:
             remplir_ligne_cases(table, 0, vente.client.nom_famille_fr or "")
             remplir_ligne_cases(table, 2, vente.client.prenom_fr or "")
-            remplir_ligne_cases(table, 4, ccp_number, is_ccp=True, cle=cle_number)  # CCP + clé sur 2 colonnes
+            remplir_ligne_cases(table, 4, ccp_number, is_ccp=True, cle=cle_number)
             remplir_ligne_cases(table, 8, vente.date_debut.strftime("%d"))
             remplir_ligne_cases(table, 10, vente.date_debut.strftime("%d/%m/%Y"))
-            remplir_ligne_cases(table, 12, str(prelevement))
+
+            # ✅ Correct amount placement
+            remplir_ligne_cases(table, 12, montant_formatted, align_right=True)
+
+            # ✅ Force "DA" and empty last cell
+            cells = table.rows[12].cells
+            total_cells = len(cells)
+
+            if total_cells >= 2:
+                # Clear last 2 cells
+                for paragraph in cells[total_cells - 2].paragraphs:
+                    for run in paragraph.runs:
+                        run.text = ""
+
+                for paragraph in cells[total_cells - 1].paragraphs:
+                    for run in paragraph.runs:
+                        run.text = ""
+
+                # Put DA
+                cells[total_cells - 2].paragraphs[0].add_run("DA")
+
+                # Last cell remains empty
+
             remplir_ligne_cases(table, 14, echeances)
 
-        # Générer le fichier Word
+        # Generate Word
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
@@ -1325,7 +1576,6 @@ class VenteFaciliteCCPWordAPIView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="ccp_{vente.id}.docx"'
         return response
-
 
 class DashboardPaiementsAPIView(APIView):
     def get(self, request):
@@ -1461,3 +1711,70 @@ def reset_all_ventes_to_initial(request):
         return Response({
             'error': f'Erreur: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+# ventes/views.py - Add this API view
+
+class AppSettingsAPIView(APIView):
+    """
+    GET /vente/settings/
+    POST /vente/settings/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get the 30% salary limit setting"""
+        try:
+            setting = AppSettings.objects.get(name='salary_limit_active')
+            return Response({
+                'name': setting.name,
+                'value': setting.value,
+                'description': setting.description
+            })
+        except AppSettings.DoesNotExist:
+            # Create default setting
+            setting = AppSettings.objects.create(
+                name='salary_limit_active',
+                value=False,
+                description='تفعيل حد 30% من الراتب للبيع بالتقسيط'
+            )
+            return Response({
+                'name': setting.name,
+                'value': setting.value,
+                'description': setting.description
+            })
+    
+    def post(self, request):
+        """Update the 30% salary limit setting"""
+        if request.user.role != 'admin':
+            return Response(
+                {"error": "Seul un administrateur peut modifier ce paramètre"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        value = request.data.get('value')
+        if value is None:
+            return Response(
+                {"error": "Le paramètre 'value' est requis"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            setting = AppSettings.objects.get(name='salary_limit_active')
+            setting.value = value
+            setting.updated_by = request.user
+            setting.save()
+        except AppSettings.DoesNotExist:
+            setting = AppSettings.objects.create(
+                name='salary_limit_active',
+                value=value,
+                description='تفعيل حد 30% من الراتب للبيع بالتقسيط',
+                updated_by=request.user
+            )
+        
+        return Response({
+            'name': setting.name,
+            'value': setting.value,
+            'description': setting.description,
+            'updated_at': setting.updated_at,
+            'updated_by': setting.updated_by.username if setting.updated_by else None
+        })
