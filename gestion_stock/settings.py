@@ -307,14 +307,14 @@ AUTHENTICATION_BACKENDS = [
 CORS_ALLOWED_ORIGINS = [
     "https://darlokman.netlify.app",
     "http://localhost:3000", 
-      "https://darlokmanfront-production.up.railway.app/"  # utile pour dev
+      "https://darlokmanfront-production.up.railway.app"  # utile pour dev
 ]
 CSRF_TRUSTED_ORIGINS = [
     'https://gestionstock-production.up.railway.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     "https://darlokman.netlify.app",
-    "https://darlokmanfront-production.up.railway.app/"
+    "https://darlokmanfront-production.up.railway.app"
 ]
  # For development only, restrict in production
 CORS_ALLOW_CREDENTIALS = True
