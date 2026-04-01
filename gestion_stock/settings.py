@@ -102,19 +102,19 @@ REDIS_PASSWORD = 'dVZwODtckOEHIVQHTZQQjRzMgqfFzaAW'
 
 # Channel Layers for WebSockets
 ASGI_APPLICATION = "gestion_stock.asgi.application"
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
 # CHANNEL_LAYERS = {
 #     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             "hosts": [("junction.proxy.rlwy.net", 41907, "dVZwODtckOEHIVQHTZQQjRzMgqfFzaAW")],
-#         },
+#         'BACKEND': 'channels.layers.InMemoryChannelLayer',
 #     },
 # }
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [("junction.proxy.rlwy.net", 41907, "dVZwODtckOEHIVQHTZQQjRzMgqfFzaAW")],
+        },
+    },
+}
 # Cache Configuration
 CACHES = {
     'default': {
