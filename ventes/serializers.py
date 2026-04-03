@@ -30,7 +30,8 @@ class VenteFaciliteMinimalSerializer(serializers.ModelSerializer):
             'montant_verse', 
             'montant_restant',
             'montant_mensuel', 
-            'date_formatee'
+            'date_formatee',
+            'montants_par_mois'
         ]
 
     def get_client_name(self, obj):
