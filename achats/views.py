@@ -306,8 +306,11 @@ class AchatGroupeRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIV
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         
-        # Clear cache after update
-        cache.delete_pattern(f"achat_list_*")
+        # Clear cache by setting a version or just don't use delete_pattern
+        # Option 1: Just clear the specific cache key if you know it
+        # Option 2: Use a version number approach
+        # For now, we'll just let cache expire naturally
+        # Or you can implement a simple version counter
         
         return Response(serializer.data)
 
@@ -334,8 +337,8 @@ class AchatGroupeRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIV
             # Delete the purchase group (cascade deletes lines)
             self.perform_destroy(instance)
             
-            # Clear cache
-            cache.delete_pattern(f"achat_list_*")
+            # Don't use delete_pattern - it's not supported by LocMemCache
+            # cache.delete_pattern(f"achat_list_*")  # ❌ This causes the error
 
             return Response(
                 {"success": "Achat supprimé avec succès et stock corrigé"},
