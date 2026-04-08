@@ -188,6 +188,7 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         data = request.data.copy()
         data['magasin_principal'] = magasin_principal_id
         data.pop('quantite', None)
+        data.pop('quantite_initiale', None)
         data.pop('magasin', None)
         data.pop('magasin_principal_quantite', None)
         
@@ -195,18 +196,18 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         produit = serializer.save()
         
-        quantite_initiale = request.data.get('quantite', 0)
-        if quantite_initiale > 0 and magasin_principal:
-            nouveaux_codes = generer_codes_barres_uniques([], quantite_initiale)
+        # quantite_initiale = request.data.get('quantite', 0)
+        # if quantite_initiale > 0 and magasin_principal:
+        #     nouveaux_codes = generer_codes_barres_uniques([], quantite_initiale)
             
-            produit.magasins.append({
-                'id': magasin_principal.id,
-                'nom': magasin_principal.nom,
-                'adresse': getattr(magasin_principal, 'adresse', ''),
-                'codes_barres': nouveaux_codes
-            })
-            produit._sync_quantite()
-            produit.save()
+        #     produit.magasins.append({
+        #         'id': magasin_principal.id,
+        #         'nom': magasin_principal.nom,
+        #         'adresse': getattr(magasin_principal, 'adresse', ''),
+        #         'codes_barres': nouveaux_codes
+        #     })
+        #     produit._sync_quantite()
+        #     produit.save()
         
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
@@ -625,6 +626,68 @@ from django.db.models.functions import Coalesce
 from .models import Produit
 
 class FamillesProduitView(APIView):
+    def get(self, request):
+        # Get all products and calculate totals per famille
+        produits = Produit.objects.filter(est_supprime=False)
+        
+        # Group by famille and calculate totals
+        familles_dict = {}
+        
+        for produit in produits:
+            famille = produit.famille or "Sans famille"
+            reference = produit.reference
+            
+            # Calculate total quantity for this product across all magasins
+            quantite_totale = produit.magasin_principal_quantite or 0
+            for mag in produit.magasins:
+                quantite_totale += mag.get('quantite', 0)
+            
+            # Calculate total value (quantity * prix_achat)
+            valeur_totale = quantite_totale * (produit.prix_achat or 0)
+            
+            # Aggregate by famille and reference
+            key = (famille, reference)
+            if key not in familles_dict:
+                familles_dict[key] = {
+                    'famille': famille,
+                    'reference': reference,
+                    'total_prix_achat': 0,
+                    'total_quantite': 0,
+                    'total_valeur': 0
+                }
+            
+            familles_dict[key]['total_prix_achat'] += produit.prix_achat or 0
+            familles_dict[key]['total_quantite'] += quantite_totale
+            familles_dict[key]['total_valeur'] += valeur_totale
+        
+        # Convert to list
+        familles_list = list(familles_dict.values())
+        
+        return Response({"familles": familles_list})
+
+# produits/views.py
+
+class FamillesDropdownView(APIView):
+    """Simple endpoint for dropdown - returns just family names as strings"""
+    # permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # Get unique family names only
+        familles = Produit.objects.filter(
+            est_supprime=False,
+            famille__isnull=False
+        ).exclude(
+            famille=''
+        ).values_list('famille', flat=True).distinct().order_by('famille')
+        
+        # Return as simple array of strings
+        return Response(list(familles))
+
+
+class FamillesStatsView(APIView):
+    """Statistics endpoint - returns families with totals"""
+    permission_classes = [IsAuthenticated]
+    
     def get(self, request):
         # Get all products and calculate totals per famille
         produits = Produit.objects.filter(est_supprime=False)

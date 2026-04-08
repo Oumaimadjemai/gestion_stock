@@ -21,4 +21,8 @@ urlpatterns = [
      path('reset-quantite-codes/', ResetQuantiteCodesBarresView.as_view(), name='reset-quantite-codes'),
      path('import-excel/', ProduitImportExcelAPIView.as_view(), name='produit-import-excel'),
     path('export-excel/', ProduitExportExcelAPIView.as_view(), name='produit-export-excel'),
+     path('produits/familles/dropdown/', FamillesDropdownView.as_view(), name='familles-dropdown'),
+    
+    # For statistics - returns complex data with totals
+    path('produits/familles/stats/', FamillesStatsView.as_view(), name='familles-stats'),
 ]
