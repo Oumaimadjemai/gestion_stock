@@ -251,7 +251,7 @@ class VentePaiementAPIView(APIView):
                     "prenom_fr": vente.client.prenom_fr,
                     "ccp": vente.client.ccp,
                     "cle": vente.client.cle,
-                    "telephone": vente.client.telephone,
+                    "telephones": vente.client.telephones or [],
                 },
                 "montant_mensuel": float(vente.montant_mensuel),
                 "montant_par_mois": vente.montants_par_mois,
@@ -392,8 +392,10 @@ class VentePaiementAPIView(APIView):
         PaiementVente.objects.create(
             vente=vente,
             montant=paiement,
+            date_paiement=now(),
             month_index=calendar_month_index,
-            status=status_str
+            status=status_str,
+            year=now().year
         )
 
         return self.get(request, pk)
@@ -836,13 +838,25 @@ class ImportPaiementsTxtAPIView(APIView):
             if default_storage.exists(file_path):
                 default_storage.delete(file_path)
 
-from django.db import transaction
-# Update the destroy methods to work with the new magasins structure
+# ventes/views.py - Fixed VenteFaciliteRetrieveUpdateDestroyAPIView
 
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings
+
+from .models import VenteFacilite, LigneVenteFacilite, PaiementVente
+from .serializers import VenteFaciliteDetailSerializer
+from produits.models import Produit
+from parametres.models import Magasin
+
+from django.conf import settings
+from django.db import transaction
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     queryset = VenteFacilite.objects.all()
@@ -852,39 +866,51 @@ class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAP
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        
-        # Check if force deletion is requested (skip stock restoration)
-        force_delete = request.query_params.get('force', False)
-        
+        force_delete = str(request.query_params.get("force", "false")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
         restored_products = []
         failed_products = []
-        restored_ids = set()
 
         try:
-            print(f"\n🗑️ Deleting sale #{instance.id}")
-            if force_delete:
-                print("⚠️ FORCE DELETE MODE: Stock will NOT be restored")
-            
-            # Get all lines for this sale
-            lignes = instance.lignes.select_related('produit').all()
-            
+            lignes = list(
+                instance.lignes.select_related("produit").all()
+            )
+
             if not force_delete:
-                # Restore each product's stock from snapshot
+
+                from produits.models import Produit
+
+                produit_ids = list(
+                    {l.produit_id for l in lignes if l.produit_id}
+                )
+
+                produits_map = {
+                    p.id: p
+                    for p in Produit.objects.select_for_update().filter(
+                        id__in=produit_ids
+                    )
+                }
+
                 for ligne in lignes:
-                    produit = ligne.produit
-                    
-                    if not produit:
+
+                    if (
+                        not ligne.produit_id
+                        or ligne.produit_id not in produits_map
+                    ):
                         failed_products.append({
                             "line_id": ligne.id,
                             "error": "Product not found"
                         })
                         continue
-                        
-                    if produit.id in restored_ids:
-                        continue
-                    
+
+                    produit = produits_map[ligne.produit_id]
+
                     snapshot = ligne.stock_snapshot
-                    
+
                     if not snapshot:
                         failed_products.append({
                             "produit_id": produit.id,
@@ -892,101 +918,81 @@ class VenteFaciliteRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAP
                             "error": "Stock snapshot missing"
                         })
                         continue
-                    
+
                     try:
-                        print(f"🔄 Restoring product: {produit.nom}")
-                        
-                        # FULL RESTORE from snapshot
                         produit.magasins = snapshot.get("magasins", [])
-                        
-                        if "codes_barres" in snapshot:
-                            produit.codes_barres = snapshot.get("codes_barres", [])
-                        
-                        # Also restore original quantity if it was stored in snapshot
-                        if "quantite_totale" in snapshot:
-                            produit.quantite_totale = snapshot.get("quantite_totale", 0)
-                        
-                        # Alternative: calculate from magasins
-                        if not produit.quantite_totale and produit.magasins:
-                            total_quantity = 0
-                            for mag in produit.magasins:
-                                total_quantity += len(mag.get('codes_barres', []))
-                            produit.quantite_totale = total_quantity
-                        
+
                         produit.save()
-                        
+
+                        produit.refresh_from_db()
+
                         restored_products.append({
                             "id": produit.id,
                             "nom": produit.nom,
-                            "quantite_restauree": produit.quantite_totale
+                            "quantite_restauree": produit.quantite_totale,
+                            "barcodes_restaures": len(
+                                snapshot.get("codes_barres", [])
+                            ),
                         })
-                        
-                        restored_ids.add(produit.id)
-                        print(f"✅ Restored: {produit.nom} (Qty: {produit.quantite_totale})")
-                        
-                    except Exception as restore_error:
+
+                    except Exception as e:
                         failed_products.append({
                             "produit_id": produit.id,
                             "produit_nom": produit.nom,
-                            "error": str(restore_error)
+                            "error": str(e)
                         })
-                        print(f"❌ Failed to restore {produit.nom}: {restore_error}")
-                
-                # If we have failed products and not forcing, raise error
-                if failed_products and not force_delete:
-                    error_msg = f"Cannot delete sale: {len(failed_products)} product(s) failed to restore"
-                    print(f"❌ {error_msg}")
-                    raise Exception(error_msg, {"failed_products": failed_products})
-            
-            # Delete all payment records
-            paiements = instance.paiements.all()
-            if paiements.exists():
-                print(f"🗑️ Deleting {paiements.count()} payment records...")
-                paiements_count = paiements.count()
-                paiements.delete()
-                print(f"✅ Deleted {paiements_count} payment records")
-            
-            # Delete the sale instance
-            print(f"🗑️ Deleting sale #{instance.id}...")
+
+                if failed_products:
+                    transaction.set_rollback(True)
+
+                    return Response(
+                        {
+                            "success": False,
+                            "error": f"{len(failed_products)} product(s) failed to restore",
+                            "failed_products": failed_products,
+                            "restored_products": restored_products,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            paiements_count = instance.paiements.count()
+
+            instance.paiements.all().delete()
+
             self.perform_destroy(instance)
-            print(f"✅ Sale #{instance.id} deleted successfully")
-            
-            response_data = {
-                "success": True,
-                "message": "Vente supprimée avec succès",
-                "restored_products": restored_products,
-                "total_restored": len(restored_products)
-            }
-            
-            if failed_products:
-                response_data["warning"] = "Some products could not be restored"
-                response_data["failed_products"] = failed_products
-                response_data["force_deleted"] = True
-            
-            return Response(response_data, status=status.HTTP_204_NO_CONTENT)
-            
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Vente supprimée avec succès",
+                    "restored_products": restored_products,
+                    "total_restored": len(restored_products),
+                    "paiements_supprimes": paiements_count,
+                },
+                status=status.HTTP_200_OK,
+            )
+
         except Exception as e:
-            # Rollback is automatically handled by @transaction.atomic
-            print(f"\n❌ ERROR during sale deletion: {str(e)}")
+            transaction.set_rollback(True)
+
             import traceback
-            traceback.print_exc()
-            
+
             error_response = {
-                "error": str(e),
                 "success": False,
+                "error": str(e),
                 "restored_products": restored_products,
-                "failed_products": failed_products
+                "failed_products": failed_products,
             }
-            
-            # Add stack trace for debugging in development
+
             if settings.DEBUG:
-                import traceback
                 error_response["traceback"] = traceback.format_exc()
-            
+
             return Response(
                 error_response,
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+
 
 from django.db import transaction
 from rest_framework.response import Response
@@ -1240,7 +1246,7 @@ class VenteFaciliteActeWordAPIView(APIView):
             "date_emission_piece":vente.client.date_emission_piece,
             "lieu_emission_piece":vente.client.lieu_emission_piece,
             "client_adresse": vente.client.adresse,
-            "client_telephone": vente.client.telephone,
+            "client_telephone": " / ".join(vente.client.telephones or []),
             "produits": produits_list,
             "total": vente.montant_total,
             "montant_verse":vente.montant_verse,
@@ -1588,34 +1594,66 @@ class VenteFaciliteCCPWordAPIView(APIView):
         return response
 
 class DashboardPaiementsAPIView(APIView):
+    def _add_months(self, value, months):
+        month = value.month - 1 + months
+        year = value.year + month // 12
+        month = month % 12 + 1
+        day = min(value.day, 28)
+        return value.replace(year=year, month=month, day=day)
+
+    def _parse_int(self, value):
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
     def get(self, request):
-        year = request.query_params.get("year")
-        month = request.query_params.get("month")
+        year = self._parse_int(request.query_params.get("year"))
+        month = self._parse_int(request.query_params.get("month"))
         status = request.query_params.get("status")
 
-        qs = PaiementVente.objects.select_related(
-            "vente", "vente__client"
-        )
-
-        if year:
-            qs = qs.filter(date_paiement__year=year)
-        if month:
-            qs = qs.filter(month_index=month)
-        if status:
-            qs = qs.filter(status=status)
-
+        ventes = VenteFacilite.objects.select_related("client").prefetch_related("paiements").all()
         data = []
-        for p in qs:
-            data.append({
-                "name": f"{p.vente.client.nom_famille_ar} {p.vente.client.prenom_ar}",
-                "account": f"{p.vente.client.ccp}/{p.vente.client.cle}",
-                "date": p.date_paiement,
-                "amount": p.vente.montant_mensuel,
-                "status": p.status,
-                "clientStatus": p.vente.client.statut,
-                "month_index": p.month_index,
-                "year": p.date_paiement.year,
-            })
+
+        for vente in ventes:
+            paiements_by_month = {}
+            for paiement in vente.paiements.all():
+                payment_year = paiement.year or paiement.date_paiement.year
+                key = (payment_year, paiement.month_index)
+                paiements_by_month[key] = paiement
+
+            mois_status = vente.mois_status or []
+
+            for index in range(vente.nombre_mois):
+                due_date = self._add_months(vente.date_debut, index)
+                due_year = due_date.year
+                due_month_index = due_date.month - 1
+
+                if year is not None and due_year != year:
+                    continue
+                if month is not None and due_month_index != month:
+                    continue
+
+                paiement = paiements_by_month.get((due_year, due_month_index))
+                row_status = paiement.status if paiement else (
+                    mois_status[index] if index < len(mois_status) else "pending"
+                )
+
+                if status and row_status != status:
+                    continue
+
+                data.append({
+                    "name": f"{vente.client.nom_famille_ar} {vente.client.prenom_ar}",
+                    "account": f"{vente.client.ccp}/{vente.client.cle}",
+                    "date": paiement.date_paiement if paiement else due_date,
+                    "amount": paiement.montant if paiement else vente.montant_mensuel,
+                    "status": row_status,
+                    "clientStatus": vente.client.statut,
+                    "month_index": due_month_index,
+                    "year": due_year,
+                    "vente_id": vente.id,
+                    "paiement_id": paiement.id if paiement else None,
+                })
 
         return Response(data)
 

@@ -148,11 +148,17 @@ class Client(models.Model):
     
     # Coordonnées
     adresse = models.TextField(verbose_name="العنوان / Adresse")
-    telephone = models.CharField(
-        max_length=20,
-        verbose_name="رقم الهاتف / Téléphone",
-        validators=[RegexValidator(r'^[0-9+]+$', 'Numéro de téléphone invalide')],
-        null=True
+    # telephone = models.CharField(
+    #     max_length=20,
+    #     verbose_name="رقم الهاتف / Téléphone",
+    #     validators=[RegexValidator(r'^[0-9+]+$', 'Numéro de téléphone invalide')],
+    #     null=True
+    # )
+    telephones = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="أرقام الهاتف / Téléphones",
+        help_text="Liste des numéros de téléphone"
     )
     
     # Profession et revenu
@@ -230,6 +236,11 @@ class Client(models.Model):
         default=False,
         verbose_name="محظور / Bloqué"
     )
+    recuperer_fichiers = models.BooleanField(
+        default=False,
+        verbose_name="استرجاع الملفات / Récupérer les fichiers"
+    )
+    
     # Métadonnées
     date_creation = models.DateTimeField(auto_now_add=True,null=True)
     date_modification = models.DateTimeField(auto_now=True,null=True)

@@ -1,7 +1,10 @@
+# filters.py - Version avec filtre magasin
+
 import django_filters
-from .models import VenteCache
+from .models import VenteCache, VenteFacilite
 from django.utils.timezone import now
 from datetime import timedelta
+
 
 class VenteCacheFilter(django_filters.FilterSet):
     # Dates
@@ -10,17 +13,18 @@ class VenteCacheFilter(django_filters.FilterSet):
     
     # Utilisateur
     users = django_filters.NumberFilter(field_name='utilisateur', lookup_expr='exact')
-    client = django_filters.NumberFilter(field_name='client',lookup_expr='exact')
-
+    client = django_filters.NumberFilter(field_name='client', lookup_expr='exact')
+    
+    # 🆕 Magasin filter
+    magasin = django_filters.NumberFilter(field_name='magasin', lookup_expr='exact')
     
     # Period quick filter
     periode = django_filters.CharFilter(method='filter_periode')
     produit = django_filters.NumberFilter(method='filter_produit')
 
-
     class Meta:
         model = VenteCache
-        fields = ['users', 'date_from', 'date_to', 'periode','produit','client']
+        fields = ['users', 'magasin', 'date_from', 'date_to', 'periode', 'produit', 'client']
 
     def filter_periode(self, queryset, name, value):
         """Filtrage rapide par période"""
@@ -43,6 +47,7 @@ class VenteCacheFilter(django_filters.FilterSet):
             return queryset.filter(date_vente__year=today.year)
 
         return queryset
+    
     def filter_produit(self, queryset, name, value):
         """
         Filtrer les ventes qui contiennent un produit spécifique dans leurs lignes
@@ -50,32 +55,33 @@ class VenteCacheFilter(django_filters.FilterSet):
         if value:
             return queryset.filter(lignes__produit=value).distinct()
         return queryset
-    
-# filters.py
-import django_filters
-from .models import VenteFacilite
-from django.utils.timezone import now
-from datetime import timedelta
 
+
+# ============================================================
+# VENTE FACILITE FILTER
+# ============================================================
 
 class VenteFaciliteFilter(django_filters.FilterSet):
     date_from = django_filters.DateFilter(field_name='date_creation', lookup_expr='gte')
     date_to = django_filters.DateFilter(method='filter_date_to')
     users = django_filters.NumberFilter(field_name='utilisateur', lookup_expr='exact')
-    client = django_filters.NumberFilter(field_name='client',lookup_expr='exact')
+    client = django_filters.NumberFilter(field_name='client', lookup_expr='exact')
+    
+    # 🆕 Magasin filter
+    magasin = django_filters.NumberFilter(field_name='magasin', lookup_expr='exact')
+    
     periode = django_filters.CharFilter(method='filter_periode')
     produit = django_filters.NumberFilter(method='filter_produit')
 
     class Meta:
         model = VenteFacilite
-        fields = ['users', 'date_from', 'date_to', 'periode','produit','client']
+        fields = ['users', 'magasin', 'date_from', 'date_to', 'periode', 'produit', 'client']
 
     def filter_date_to(self, queryset, name, value):
         """Include the full day for date_to"""
         if value:
             return queryset.filter(date_creation__lt=value + timedelta(days=1))
         return queryset
-
 
     def filter_periode(self, queryset, name, value):
         """Quick period filtering"""
@@ -97,6 +103,7 @@ class VenteFaciliteFilter(django_filters.FilterSet):
         elif value == "this_year":
             return queryset.filter(date_creation__year=today.year)
         return queryset
+    
     def filter_produit(self, queryset, name, value):
         """
         Filtrer les ventes qui contiennent un produit spécifique dans leurs lignes

@@ -207,32 +207,64 @@ class FichierClientSerializer(serializers.ModelSerializer):
         
 #         return instance
     
+# Dans votre fichier authentification/serializers.py
+
+# In your serializers.py, update the ClientSerializer
+
 class ClientSerializer(serializers.ModelSerializer):
     fichiers = FichierClientSerializer(many=True, read_only=True)
-
-    # Ajout de nouveaux fichiers
     fichiers_upload = serializers.ListField(
         child=serializers.FileField(max_length=100000, allow_empty_file=False),
         write_only=True,
         required=False
     )
-
-    # Mise à jour/remplacement de fichiers existants
     fichiers_update = serializers.ListField(
-        child=serializers.DictField(),  # ex: {"id": 1, "fichier": <InMemoryUploadedFile>}
+        child=serializers.DictField(),
         write_only=True,
         required=False
     )
-
+    
+    # Validation personnalisée pour les téléphones
+    def validate_telephones(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Les téléphones doivent être une liste")
+        
+        validated_numbers = []
+        for phone in value:
+            if phone and str(phone).strip():
+                # Nettoyer le numéro
+                cleaned = ''.join(filter(lambda x: x.isdigit() or x == '+', str(phone)))
+                if cleaned:
+                    # Validation basique (au moins 6 chiffres)
+                    digits_only = cleaned.replace('+', '')
+                    if len(digits_only) < 6:
+                        raise serializers.ValidationError(
+                            f"Le numéro {phone} est invalide (trop court)"
+                        )
+                    validated_numbers.append(cleaned)
+        
+        return validated_numbers
+    
     class Meta:
         model = Client
-        fields = '__all__'
+        fields = '__all__'  # This will automatically include recuperer_fichiers
+        # Or specify fields explicitly:
+        # fields = [
+        #     'id', 'assurance_militaire', 'date_expedition', 'nom_famille_ar',
+        #     'prenom_ar', 'nom_famille_fr', 'prenom_fr', 'nom_pere', 'nom_mere',
+        #     'numero_national', 'date_naissance', 'lieu_naissance', 'adresse',
+        #     'telephones', 'profession', 'revenu', 'type_piece_identite',
+        #     'numero_piece_identite', 'date_emission_piece', 'lieu_emission_piece',
+        #     'ccp', 'cle', 'code', 'dette_initiale', 'note', 'statut', 'bloque',
+        #     'recuperer_fichiers',  # Add this line
+        #     'date_creation', 'date_modification', 'jour', 'fichiers',
+        #     'fichiers_upload', 'fichiers_update'
+        # ]
 
     def create(self, validated_data):
         fichiers_data = validated_data.pop('fichiers_upload', [])
         client = Client.objects.create(**validated_data)
 
-        # 🔹 Ajout des fichiers uploadés
         for fichier_data in fichiers_data:
             FichierClient.objects.create(client=client, fichier=fichier_data)
 
@@ -242,16 +274,13 @@ class ClientSerializer(serializers.ModelSerializer):
         fichiers_data = validated_data.pop('fichiers_upload', [])
         fichiers_update_data = validated_data.pop('fichiers_update', [])
 
-        # 🔹 Mise à jour des champs de base du client
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # 🔹 Ajout de nouveaux fichiers
         for fichier_data in fichiers_data:
             FichierClient.objects.create(client=instance, fichier=fichier_data)
 
-        # 🔹 Mise à jour/remplacement des fichiers existants
         for fichier_dict in fichiers_update_data:
             fichier_id = fichier_dict.get("id")
             fichier_new = fichier_dict.get("fichier")
@@ -259,14 +288,14 @@ class ClientSerializer(serializers.ModelSerializer):
             if fichier_id and fichier_new:
                 try:
                     fichier_obj = FichierClient.objects.get(id=fichier_id, client=instance)
-                    fichier_obj.fichier.delete(save=False)  # supprime l'ancien fichier du stockage
+                    fichier_obj.fichier.delete(save=False)
                     fichier_obj.fichier = fichier_new
                     fichier_obj.save()
                 except FichierClient.DoesNotExist:
-                    continue  # ignore si le fichier n’existe pas
+                    continue
 
         return instance
- 
+
 class FournisseurSerializer(serializers.ModelSerializer):
     wilaya_display = serializers.CharField(source='get_wilaya_display', read_only=True)
     

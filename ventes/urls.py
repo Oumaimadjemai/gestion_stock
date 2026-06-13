@@ -3,7 +3,7 @@ from .views import *
 
 urlpatterns = [
     path('ventes-facilite/', VenteFaciliteCreateAPIView.as_view()),
-   path('ventes-facilite/<int:pk>/', VenteFaciliteDetailAPIView.as_view(), name='vente-facilite-detail'),
+   path('ventes-facilite/<int:pk>/', VenteFaciliteRetrieveUpdateDestroyAPIView.as_view(), name='vente-facilite-detail'),
     path("vente/payer/<int:pk>/", VentePaiementAPIView.as_view(), name="vente-payer"),
     path("vente/import-paiements-txt/", ImportPaiementsTxtAPIView.as_view(), name="import-paiements-txt"),
     path('ventes-facilite/<int:pk>/acte/word/', VenteFaciliteActeWordAPIView.as_view(), name='vente-facilite-acte-word'),

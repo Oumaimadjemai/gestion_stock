@@ -1,4 +1,5 @@
-# stats/views.py - FIXED VERSION (no quantite_totale in SQL)
+# stats/views.py - UPDATED with year filter
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -6,11 +7,11 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from django.db import connection
 from django.core.cache import cache
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 
 from authentification.models import Client, Fournisseur
 from produits.models import Produit
-from ventes.models import VenteFacilite, VenteCache
+from ventes.models import VenteFacilite, VenteCache, LigneVenteFacilite
 from depenses.models import Depense
 from django.contrib.auth import get_user_model
 User = get_user_model()
@@ -20,21 +21,40 @@ USER_TABLE = User._meta.db_table
 class DashboardStatsAPIView(APIView):
     """
     GET /stats/dashboard/
-    ULTRA OPTIMIZED version with caching
+    ULTRA OPTIMIZED version with caching and year filter
     """
     permission_classes = [IsAuthenticated]
     
-    def get_date_range(self, periode):
+    def get_date_range(self, periode, year=None):
+        """
+        Get date range based on periode and optional year
+        """
         today = timezone.now().date()
         
-        ranges = {
-            'today': (today, today),
-            'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
-            'this_week': (today - timedelta(days=today.weekday()), today),
-            'this_month': (today.replace(day=1), today),
-            'last_month': ((today.replace(day=1) - timedelta(days=1)).replace(day=1), today.replace(day=1) - timedelta(days=1)),
-            'this_year': (today.replace(month=1, day=1), today),
-        }
+        # If year is specified, use that year for calculations
+        if year:
+            try:
+                year = int(year)
+                ranges = {
+                    'today': (today, today),
+                    'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
+                    'this_week': (today - timedelta(days=today.weekday()), today),
+                    'this_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+                    'last_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+                    'this_year': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+                }
+            except ValueError:
+                year = None
+        
+        if not year:
+            ranges = {
+                'today': (today, today),
+                'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
+                'this_week': (today - timedelta(days=today.weekday()), today),
+                'this_month': (today.replace(day=1), today),
+                'last_month': ((today.replace(day=1) - timedelta(days=1)).replace(day=1), today.replace(day=1) - timedelta(days=1)),
+                'this_year': (today.replace(month=1, day=1), today),
+            }
         
         if periode in ranges:
             return {'start': ranges[periode][0], 'end': ranges[periode][1]}
@@ -52,16 +72,19 @@ class DashboardStatsAPIView(APIView):
     def get(self, request):
         periode = request.query_params.get('periode', 'this_month')
         user_filter = request.query_params.get('user', None)
+        year_filter = request.query_params.get('year', None)  # New year filter
         
         is_admin = request.user.role == 'admin'
         if not is_admin:
             user_filter = str(request.user.id)
         
-        date_range = self.get_date_range(periode)
+        # Get date range with year filter
+        date_range = self.get_date_range(periode, year_filter)
         start_date = date_range['start']
         end_date = date_range['end']
         
-        cache_key = f"dashboard_stats_{periode}_{user_filter}"
+        # Cache key includes year filter
+        cache_key = f"dashboard_stats_{periode}_{user_filter}_{year_filter}"
         cached_response = cache.get(cache_key)
         if cached_response:
             return Response(cached_response)
@@ -69,7 +92,10 @@ class DashboardStatsAPIView(APIView):
         # ========== 1. Installment sales totals ==========
         facilite_queryset = VenteFacilite.objects.all()
         if start_date:
-            facilite_queryset = facilite_queryset.filter(date_creation__date__gte=start_date, date_creation__date__lte=end_date)
+            facilite_queryset = facilite_queryset.filter(
+                date_creation__date__gte=start_date,
+                date_creation__date__lte=end_date
+            )
         if user_filter:
             facilite_queryset = facilite_queryset.filter(utilisateur_id=user_filter)
         
@@ -78,8 +104,6 @@ class DashboardStatsAPIView(APIView):
         total_facilite_amount = float(total_facilite_amount)
         
         # ========== 2. Calculate purchase cost from ligne items ==========
-        # Get all line items for these sales
-        from ventes.models import LigneVenteFacilite
         ligne_queryset = LigneVenteFacilite.objects.filter(vente__in=facilite_queryset).select_related('produit')
         
         total_purchase_cost = 0
@@ -90,7 +114,10 @@ class DashboardStatsAPIView(APIView):
         # ========== 3. Cash sales totals ==========
         cash_queryset = VenteCache.objects.all()
         if start_date:
-            cash_queryset = cash_queryset.filter(date_vente__date__gte=start_date, date_vente__date__lte=end_date)
+            cash_queryset = cash_queryset.filter(
+                date_vente__date__gte=start_date,
+                date_vente__date__lte=end_date
+            )
         if user_filter:
             cash_queryset = cash_queryset.filter(utilisateur_id=user_filter)
         
@@ -98,11 +125,10 @@ class DashboardStatsAPIView(APIView):
         total_cash_amount = cash_queryset.aggregate(total=Sum('montant_total'))['total'] or 0
         total_cash_amount = float(total_cash_amount)
         
-        # ========== 4. Product value (calculate in Python from JSON) ==========
+        # ========== 4. Product value ==========
         total_product_value = 0
         for product in Produit.objects.filter(est_supprime=False).only('prix_achat', 'magasins'):
             if product.prix_achat and product.magasins:
-                # Calculate total quantity from magasins JSON
                 total_quantity = sum(len(mag.get('codes_barres', [])) for mag in product.magasins)
                 total_product_value += float(product.prix_achat) * total_quantity
         
@@ -117,7 +143,6 @@ class DashboardStatsAPIView(APIView):
         # ========== 6. Sales by user with benefits ==========
         sales_by_user = []
         if not user_filter and is_admin:
-            # Group by user
             users_data = facilite_queryset.values('utilisateur_id', 'utilisateur__username').annotate(
                 total_sales=Sum('montant_total')
             ).order_by('-total_sales')
@@ -127,7 +152,6 @@ class DashboardStatsAPIView(APIView):
                 user_name = user_data['utilisateur__username'] or 'غير معروف'
                 user_sales = float(user_data['total_sales'] or 0)
                 
-                # Get purchase cost for this user's sales
                 user_lignes = LigneVenteFacilite.objects.filter(
                     vente__in=facilite_queryset.filter(utilisateur_id=user_id)
                 ).select_related('produit')
@@ -146,14 +170,16 @@ class DashboardStatsAPIView(APIView):
                 })
         
         # ========== 7. Monthly profits ==========
-        current_year = timezone.now().year
+        # Use the selected year if provided, otherwise current year
+        target_year = int(year_filter) if year_filter and year_filter.isdigit() else timezone.now().year
+        
         months = ["جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
                   "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
         
         monthly_profits = []
         for month in range(1, 13):
             month_ventes = VenteFacilite.objects.filter(
-                date_creation__year=current_year,
+                date_creation__year=target_year,
                 date_creation__month=month
             )
             if user_filter:
@@ -162,7 +188,6 @@ class DashboardStatsAPIView(APIView):
             month_sales = month_ventes.aggregate(total=Sum('montant_total'))['total'] or 0
             month_sales = float(month_sales)
             
-            # Get purchase cost for this month
             month_lignes = LigneVenteFacilite.objects.filter(
                 vente__in=month_ventes
             ).select_related('produit')
@@ -175,11 +200,11 @@ class DashboardStatsAPIView(APIView):
             month_profit = (month_sales - month_cost) * 100
             
             monthly_profits.append({
-                'month': f"{months[month-1]} {current_year}",
+                'month': f"{months[month-1]} {target_year}",
                 'value': round(month_profit, 2)
             })
         
-        # ========== 8. Product families (from database) ==========
+        # ========== 8. Product families ==========
         families = {}
         for product in Produit.objects.filter(est_supprime=False).only('famille', 'prix_achat', 'magasins'):
             if product.prix_achat and product.magasins:
@@ -240,6 +265,7 @@ class DashboardStatsAPIView(APIView):
             'total_fournisseurs': total_fournisseurs,
             'pending_installments': pending_installments,
             'overdue_payments': overdue_payments,
+            'selected_year': target_year,  # Return the year used
         }
         
         cache.set(cache_key, response_data, 300)
@@ -292,6 +318,25 @@ User = get_user_model()
 
 
 # stats/views.py - FIXED SalesReportAPIView without Coalesce issues
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from datetime import datetime, timedelta
+from django.db.models import Sum, Count
+from django.core.cache import cache
+from django.contrib.auth import get_user_model
+
+from authentification.models import Client
+from produits.models import Produit
+from ventes.models import VenteFacilite, VenteCache, LigneVenteFacilite, LigneVenteCache
+from depenses.models import Depense
+
+User = get_user_model()
+
+
+# stats/views.py - FIXED SalesReportAPIView with only telephones
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -519,12 +564,14 @@ class SalesReportAPIView(APIView):
             if not client_id:
                 continue
             if client_id not in client_data:
+                # ✅ FIXED: Get telephones array correctly
+                client_telephones = vente.client.telephones if vente.client and hasattr(vente.client, 'telephones') and vente.client.telephones else []
                 client_data[client_id] = {
                     'id': client_id,
                     'nom_famille': vente.client.nom_famille_ar if vente.client else '',
                     'prenom': vente.client.prenom_ar if vente.client else '',
                     'ccp': vente.client.ccp if vente.client else '',
-                    'telephone': vente.client.telephone if vente.client else '',
+                    'telephones': client_telephones,  # ✅ Only telephones array
                     'total_amount': 0,
                     'total_paid': 0,
                     'total_remaining': 0,
@@ -538,7 +585,7 @@ class SalesReportAPIView(APIView):
                 'id': data['id'],
                 'client': f"{data['nom_famille']} {data['prenom']}",
                 'ccp': data['ccp'],
-                'telephone': data['telephone'],
+                'telephones': data['telephones'],  # ✅ Only telephones array
                 'total_montant_total': data['total_amount'],
                 'total_montant_verse': data['total_paid'],
                 'total_montant_restant': data['total_remaining'],
@@ -554,12 +601,14 @@ class SalesReportAPIView(APIView):
             if not client_id:
                 continue
             if client_id not in client_cash_data:
+                # ✅ FIXED: Get telephones array correctly
+                client_telephones = vente.client.telephones if vente.client and hasattr(vente.client, 'telephones') and vente.client.telephones else []
                 client_cash_data[client_id] = {
                     'id': client_id,
                     'nom_famille': vente.client.nom_famille_ar if vente.client else '',
                     'prenom': vente.client.prenom_ar if vente.client else '',
                     'ccp': vente.client.ccp if vente.client else '',
-                    'telephone': vente.client.telephone if vente.client else '',
+                    'telephones': client_telephones,  # ✅ Only telephones array
                     'total_amount': 0,
                     'total_count': 0,
                 }
@@ -571,7 +620,7 @@ class SalesReportAPIView(APIView):
                 'id': data['id'],
                 'client': f"{data['nom_famille']} {data['prenom']}",
                 'ccp': data['ccp'],
-                'telephone': data['telephone'],
+                'telephones': data['telephones'],  # ✅ Only telephones array
                 'total_montant': data['total_amount'],
                 'nombre_de_ventes': data['total_count'],
             })
@@ -615,22 +664,6 @@ class SalesReportAPIView(APIView):
             'top_clients_installment': top_clients_installment[:10],
             'top_clients_cash': top_clients_cash[:10],
         })
-# stats/views.py - Fixed ProductDetailAPIView and ClientDetailAPIView
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.utils import timezone
-from datetime import datetime, timedelta
-from django.db.models import Sum, Count
-from django.core.cache import cache
-from django.contrib.auth import get_user_model
-
-from authentification.models import Client
-from produits.models import Produit
-from ventes.models import VenteFacilite, VenteCache, LigneVenteFacilite, LigneVenteCache
-from depenses.models import Depense
-
-User = get_user_model()
 
 
 class ClientDetailAPIView(APIView):
@@ -663,14 +696,34 @@ class ClientDetailAPIView(APIView):
         for vente in cash_ventes:
             total_cash += float(vente.montant_total)
         
+        # ✅ FIXED: Get telephones array
+        client_telephones = client.telephones if hasattr(client, 'telephones') and client.telephones else []
+        
         return Response({
             'id': client.id,
             'nom_famille_ar': client.nom_famille_ar,
             'prenom_ar': client.prenom_ar,
+            'nom_famille_fr': client.nom_famille_fr,
+            'prenom_fr': client.prenom_fr,
             'ccp': client.ccp,
             'cle': client.cle,
-            'telephone': client.telephone,
+            'telephones': client_telephones,  # ✅ Only telephones array
             'adresse': client.adresse,
+            'statut': client.statut,
+            'bloque': client.bloque,
+            'note': client.note,
+            'revenu': client.revenu,
+            'profession': client.profession,
+            'jour': client.jour,
+            'numero_national': client.numero_national,
+            'date_naissance': client.date_naissance,
+            'lieu_naissance': client.lieu_naissance,
+            'nom_pere': client.nom_pere,
+            'nom_mere': client.nom_mere,
+            'type_piece_identite': client.type_piece_identite,
+            'numero_piece_identite': client.numero_piece_identite,
+            'date_emission_piece': client.date_emission_piece,
+            'lieu_emission_piece': client.lieu_emission_piece,
             'total_facilite': total_facilite,
             'paye_facilite': total_paid,
             'reste_facilite': total_remaining,
@@ -679,6 +732,76 @@ class ClientDetailAPIView(APIView):
             'ventes_cash': list(cash_ventes.values('id', 'date_vente', 'montant_total')),
         })
 
+
+class ProductDetailAPIView(APIView):
+    """
+    GET /stats/product/{id}/
+    Returns detailed information about a product
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, product_id):
+        # Get product details
+        product = Produit.objects.get(id=product_id)
+        
+        # Get installment sales
+        facilite_lignes = LigneVenteFacilite.objects.filter(produit_id=product_id).select_related('vente')
+        
+        total_facilite_amount = 0
+        total_facilite_quantity = 0
+        
+        for ligne in facilite_lignes:
+            total_facilite_amount += float(ligne.sous_total)
+            total_facilite_quantity += ligne.quantite
+        
+        # Get cash sales
+        cash_lignes = LigneVenteCache.objects.filter(produit_id=product_id).select_related('vente')
+        
+        total_cash_amount = 0
+        total_cash_quantity = 0
+        
+        for ligne in cash_lignes:
+            total_cash_amount += float(ligne.sous_total)
+            total_cash_quantity += ligne.quantite
+        
+        # Calculate total quantity from magasins
+        total_quantity = 0
+        if product.magasins:
+            for mag in product.magasins:
+                total_quantity += len(mag.get('codes_barres', []))
+        
+        return Response({
+            'id': product.id,
+            'nom': product.nom,
+            'reference': product.reference,
+            'famille': product.famille,
+            'marque': product.marque,
+            'prix_achat': float(product.prix_achat) if product.prix_achat else 0,
+            'prix_vente_cache': float(product.prix_vente_cache) if product.prix_vente_cache else 0,
+            'quantite': total_quantity,
+            'total_facilite': total_facilite_amount,
+            'quantite_facilite': total_facilite_quantity,
+            'total_cash': total_cash_amount,
+            'quantite_cash': total_cash_quantity,
+            'ventes_facilite': [
+                {
+                    'id': ligne.vente.id,
+                    'date_formatee': ligne.vente.date_creation.strftime('%d/%m/%Y'),
+                    'quantite': ligne.quantite,
+                    'montant_total': float(ligne.sous_total),
+                }
+                for ligne in facilite_lignes
+            ],
+            'ventes_cash': [
+                {
+                    'id': ligne.vente.id,
+                    'date_formatee': ligne.vente.date_vente.strftime('%d/%m/%Y'),
+                    'quantite': ligne.quantite,
+                    'montant_total': float(ligne.sous_total),
+                }
+                for ligne in cash_lignes
+            ],
+        })
 
 class ProductDetailAPIView(APIView):
     """

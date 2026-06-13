@@ -1,3 +1,5 @@
+# stats/serializers.py - Updated with selected_year
+
 from rest_framework import serializers
 
 class DashboardStatsSerializer(serializers.Serializer):
@@ -23,3 +25,6 @@ class DashboardStatsSerializer(serializers.Serializer):
     total_fournisseurs = serializers.IntegerField()
     pending_installments = serializers.IntegerField()
     overdue_payments = serializers.IntegerField()
+    
+    # Selected year (optional)
+    selected_year = serializers.IntegerField(required=False)

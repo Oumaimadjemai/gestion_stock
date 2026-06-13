@@ -130,6 +130,9 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
+        magasin_param = self.request.query_params.get('magasin')
+        magasin_id = int(magasin_param) if magasin_param and magasin_param != "null" else None
+
         
         # Calculate totals for filtered products
         total_quantite = 0
@@ -139,6 +142,8 @@ class ProduitListCreateAPIView(generics.ListCreateAPIView):
         for produit in queryset:
             # CORRECTION: Parcourir tous les magasins une seule fois
             for mag in produit.magasins:
+                if magasin_id and mag.get('id') != magasin_id:
+                    continue  # Skip if we're filtering by a specific magasin and this isn't it
                 qty = len(mag.get('codes_barres', []))
                 total_quantite += qty
                 total_valeur += qty * (produit.prix_achat or 0)
