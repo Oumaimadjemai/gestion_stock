@@ -103,10 +103,13 @@ class ClientListCreateView(generics.ListCreateAPIView):
         periode = self.request.query_params.get('periode')
         statut = self.request.query_params.get('statut')
         bloque = self.request.query_params.get('bloque')
+        recuperer_fichiers = self.request.query_params.get('recuperer_fichiers')  # NEW: Add filter
         if statut:
           queryset = queryset.filter(statut=statut)
         if bloque is not None:
           queryset = queryset.filter(bloque=bloque.lower() in ['true', '1'])
+        if recuperer_fichiers is not None:
+          queryset = queryset.filter(recuperer_fichiers=recuperer_fichiers.lower() in ['true', '1'])
         today = now().date()
 
         if periode:
