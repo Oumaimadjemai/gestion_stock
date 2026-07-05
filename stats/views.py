@@ -18,6 +18,281 @@ User = get_user_model()
 USER_TABLE = User._meta.db_table
 
 
+# class DashboardStatsAPIView(APIView):
+#     """
+#     GET /stats/dashboard/
+#     ULTRA OPTIMIZED version with caching and year filter
+#     """
+#     permission_classes = [IsAuthenticated]
+    
+#     def get_date_range(self, periode, year=None):
+#         """
+#         Get date range based on periode and optional year
+#         """
+#         today = timezone.now().date()
+        
+#         # If year is specified, use that year for calculations
+#         if year:
+#             try:
+#                 year = int(year)
+#                 ranges = {
+#                     'today': (today, today),
+#                     'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
+#                     'this_week': (today - timedelta(days=today.weekday()), today),
+#                     'this_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+#                     'last_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+#                     'this_year': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
+#                 }
+#             except ValueError:
+#                 year = None
+        
+#         if not year:
+#             ranges = {
+#                 'today': (today, today),
+#                 'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
+#                 'this_week': (today - timedelta(days=today.weekday()), today),
+#                 'this_month': (today.replace(day=1), today),
+#                 'last_month': ((today.replace(day=1) - timedelta(days=1)).replace(day=1), today.replace(day=1) - timedelta(days=1)),
+#                 'this_year': (today.replace(month=1, day=1), today),
+#             }
+        
+#         if periode in ranges:
+#             return {'start': ranges[periode][0], 'end': ranges[periode][1]}
+#         return {'start': None, 'end': None}
+    
+#     def get_cached_or_query(self, cache_key, query_func, timeout=300):
+#         cached_data = cache.get(cache_key)
+#         if cached_data is not None:
+#             return cached_data
+        
+#         data = query_func()
+#         cache.set(cache_key, data, timeout)
+#         return data
+    
+#     def get(self, request):
+#         periode = request.query_params.get('periode', 'this_month')
+#         user_filter = request.query_params.get('user', None)
+#         year_filter = request.query_params.get('year', None)  # New year filter
+        
+#         is_admin = request.user.role == 'admin'
+#         if not is_admin:
+#             user_filter = str(request.user.id)
+        
+#         # Get date range with year filter
+#         date_range = self.get_date_range(periode, year_filter)
+#         start_date = date_range['start']
+#         end_date = date_range['end']
+        
+#         # Cache key includes year filter
+#         cache_key = f"dashboard_stats_{periode}_{user_filter}_{year_filter}"
+#         cached_response = cache.get(cache_key)
+#         if cached_response:
+#             return Response(cached_response)
+        
+#         # ========== 1. Installment sales totals ==========
+#         facilite_queryset = VenteFacilite.objects.all()
+#         if start_date:
+#             facilite_queryset = facilite_queryset.filter(
+#                 date_creation__date__gte=start_date,
+#                 date_creation__date__lte=end_date
+#             )
+#         if user_filter:
+#             facilite_queryset = facilite_queryset.filter(utilisateur_id=user_filter)
+        
+#         total_facilite_sales = facilite_queryset.count()
+#         total_facilite_amount = facilite_queryset.aggregate(total=Sum('montant_total'))['total'] or 0
+#         total_facilite_amount = float(total_facilite_amount)
+        
+#         # ========== 2. Calculate purchase cost from ligne items ==========
+#         ligne_queryset = LigneVenteFacilite.objects.filter(vente__in=facilite_queryset).select_related('produit')
+        
+#         total_purchase_cost = 0
+#         for ligne in ligne_queryset:
+#             if ligne.produit and ligne.produit.prix_achat:
+#                 total_purchase_cost += float(ligne.produit.prix_achat) * ligne.quantite
+        
+#         # ========== 3. Cash sales totals ==========
+#         cash_queryset = VenteCache.objects.all()
+#         if start_date:
+#             cash_queryset = cash_queryset.filter(
+#                 date_vente__date__gte=start_date,
+#                 date_vente__date__lte=end_date
+#             )
+#         if user_filter:
+#             cash_queryset = cash_queryset.filter(utilisateur_id=user_filter)
+        
+#         total_cash_sales = cash_queryset.count()
+#         total_cash_amount = cash_queryset.aggregate(total=Sum('montant_total'))['total'] or 0
+#         total_cash_amount = float(total_cash_amount)
+        
+#         # ========== 4. Product value ==========
+#         total_product_value = 0
+#         for product in Produit.objects.filter(est_supprime=False).only('prix_achat', 'magasins'):
+#             if product.prix_achat and product.magasins:
+#                 total_quantity = sum(len(mag.get('codes_barres', [])) for mag in product.magasins)
+#                 total_product_value += float(product.prix_achat) * total_quantity
+        
+#         # ========== 5. Total expenses ==========
+#         expense_queryset = Depense.objects.all()
+#         if start_date:
+#             expense_queryset = expense_queryset.filter(date__gte=start_date, date__lte=end_date)
+        
+#         total_expenses = expense_queryset.aggregate(total=Sum('montant'))['total'] or 0
+#         total_expenses = float(total_expenses)
+        
+#         # ========== 6. Sales by user with benefits ==========
+#         sales_by_user = []
+#         if not user_filter and is_admin:
+#             users_data = facilite_queryset.values('utilisateur_id', 'utilisateur__username').annotate(
+#                 total_sales=Sum('montant_total')
+#             ).order_by('-total_sales')
+            
+#             for user_data in users_data:
+#                 user_id = user_data['utilisateur_id']
+#                 user_name = user_data['utilisateur__username'] or 'غير معروف'
+#                 user_sales = float(user_data['total_sales'] or 0)
+                
+#                 user_lignes = LigneVenteFacilite.objects.filter(
+#                     vente__in=facilite_queryset.filter(utilisateur_id=user_id)
+#                 ).select_related('produit')
+                
+#                 user_cost = 0
+#                 for ligne in user_lignes:
+#                     if ligne.produit and ligne.produit.prix_achat:
+#                         user_cost += float(ligne.produit.prix_achat) * ligne.quantite
+                
+#                 user_benefit = user_sales - user_cost
+                
+#                 sales_by_user.append({
+#                     'name': user_name,
+#                     'المبيعات': round(user_sales * 100, 2),
+#                     'الفائدة': round(user_benefit * 100, 2)
+#                 })
+        
+#         # ========== 7. Monthly profits ==========
+#         # Use the selected year if provided, otherwise current year
+#         target_year = int(year_filter) if year_filter and year_filter.isdigit() else timezone.now().year
+        
+#         months = ["جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
+#                   "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+        
+#         monthly_profits = []
+#         for month in range(1, 13):
+#             month_ventes = VenteFacilite.objects.filter(
+#                 date_creation__year=target_year,
+#                 date_creation__month=month
+#             )
+#             if user_filter:
+#                 month_ventes = month_ventes.filter(utilisateur_id=user_filter)
+            
+#             month_sales = month_ventes.aggregate(total=Sum('montant_total'))['total'] or 0
+#             month_sales = float(month_sales)
+            
+#             month_lignes = LigneVenteFacilite.objects.filter(
+#                 vente__in=month_ventes
+#             ).select_related('produit')
+            
+#             month_cost = 0
+#             for ligne in month_lignes:
+#                 if ligne.produit and ligne.produit.prix_achat:
+#                     month_cost += float(ligne.produit.prix_achat) * ligne.quantite
+            
+#             month_profit = (month_sales - month_cost) * 100
+            
+#             monthly_profits.append({
+#                 'month': f"{months[month-1]} {target_year}",
+#                 'value': round(month_profit, 2)
+#             })
+        
+#         # ========== 8. Product families ==========
+#         families = {}
+#         for product in Produit.objects.filter(est_supprime=False).only('famille', 'prix_achat', 'magasins'):
+#             if product.prix_achat and product.magasins:
+#                 family = product.famille or "غير مصنف"
+#                 total_quantity = sum(len(mag.get('codes_barres', [])) for mag in product.magasins)
+#                 value = float(product.prix_achat) * total_quantity
+#                 if value > 0:
+#                     families[family] = families.get(family, 0) + value
+        
+#         product_families = [
+#             {'name': name, 'value': round(value, 2)}
+#             for name, value in sorted(families.items(), key=lambda x: x[1], reverse=True)[:20]
+#         ]
+        
+#         # ========== 9. Fast counts with caching ==========
+#         def get_total_clients():
+#             return Client.objects.count()
+        
+#         def get_total_products():
+#             return Produit.objects.filter(est_supprime=False).count()
+        
+#         def get_total_fournisseurs():
+#             return Fournisseur.objects.count()
+        
+#         def get_pending_installments():
+#             return VenteFacilite.objects.filter(solde_regle=False).count()
+        
+#         def get_overdue_payments():
+#             return VenteFacilite.objects.filter(
+#                 solde_regle=False,
+#                 date_fin__lt=timezone.now().date()
+#             ).count()
+        
+#         total_clients = self.get_cached_or_query('total_clients_count', get_total_clients, 3600)
+#         total_products = self.get_cached_or_query('total_products_count', get_total_products, 3600)
+#         total_fournisseurs = self.get_cached_or_query('total_fournisseurs_count', get_total_fournisseurs, 3600)
+#         pending_installments = self.get_cached_or_query('pending_installments_count', get_pending_installments, 300)
+#         overdue_payments = self.get_cached_or_query('overdue_payments_count', get_overdue_payments, 300)
+        
+#         # ========== 10. Profit percentage ==========
+#         profit_percentage = 0
+#         if total_facilite_amount > 0:
+#             profit_percentage = ((total_facilite_amount - total_purchase_cost) / total_facilite_amount) * 100
+        
+#         response_data = {
+#             'total_clients': total_clients,
+#             'total_facilite_sales': total_facilite_sales,
+#             'total_facilite_amount': round(total_facilite_amount, 2),
+#             'total_cash_sales': total_cash_sales,
+#             'total_cash_amount': round(total_cash_amount, 2),
+#             'total_product_value': round(total_product_value, 2),
+#             'total_expenses': round(total_expenses, 2),
+#             'profit_percentage': round(profit_percentage, 2),
+#             'sales_by_user': sales_by_user,
+#             'monthly_profits': monthly_profits,
+#             'product_families': product_families,
+#             'total_products': total_products,
+#             'total_fournisseurs': total_fournisseurs,
+#             'pending_installments': pending_installments,
+#             'overdue_payments': overdue_payments,
+#             'selected_year': target_year,  # Return the year used
+#         }
+        
+#         cache.set(cache_key, response_data, 300)
+        
+#         return Response(response_data)
+
+# stats/views.py - UPDATED DashboardStatsAPIView with both total_clients and new_clients
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from datetime import datetime, timedelta
+from django.db import connection
+from django.core.cache import cache
+from django.db.models import Sum, Count, Q
+from django.db.models.functions import TruncDate
+
+from authentification.models import Client, Fournisseur
+from produits.models import Produit
+from ventes.models import VenteFacilite, VenteCache, LigneVenteFacilite
+from depenses.models import Depense
+from django.contrib.auth import get_user_model
+User = get_user_model()
+USER_TABLE = User._meta.db_table
+
+
 class DashboardStatsAPIView(APIView):
     """
     GET /stats/dashboard/
@@ -72,7 +347,7 @@ class DashboardStatsAPIView(APIView):
     def get(self, request):
         periode = request.query_params.get('periode', 'this_month')
         user_filter = request.query_params.get('user', None)
-        year_filter = request.query_params.get('year', None)  # New year filter
+        year_filter = request.query_params.get('year', None)  # Year filter
         
         is_admin = request.user.role == 'admin'
         if not is_admin:
@@ -140,7 +415,22 @@ class DashboardStatsAPIView(APIView):
         total_expenses = expense_queryset.aggregate(total=Sum('montant'))['total'] or 0
         total_expenses = float(total_expenses)
         
-        # ========== 6. Sales by user with benefits ==========
+        # ========== 6. NEW CLIENTS (filtered by date) ==========
+        new_clients_queryset = Client.objects.all()
+        if start_date:
+            new_clients_queryset = new_clients_queryset.filter(
+                date_creation__date__gte=start_date,
+                date_creation__date__lte=end_date
+            )
+        new_clients = new_clients_queryset.count()
+        
+        # ========== 7. TOTAL CLIENTS (global count - no date filter) ==========
+        def get_total_clients():
+            return Client.objects.count()
+        
+        total_clients = self.get_cached_or_query('total_clients_count', get_total_clients, 3600)
+        
+        # ========== 8. Sales by user with benefits ==========
         sales_by_user = []
         if not user_filter and is_admin:
             users_data = facilite_queryset.values('utilisateur_id', 'utilisateur__username').annotate(
@@ -169,7 +459,7 @@ class DashboardStatsAPIView(APIView):
                     'الفائدة': round(user_benefit * 100, 2)
                 })
         
-        # ========== 7. Monthly profits ==========
+        # ========== 9. Monthly profits ==========
         # Use the selected year if provided, otherwise current year
         target_year = int(year_filter) if year_filter and year_filter.isdigit() else timezone.now().year
         
@@ -204,7 +494,7 @@ class DashboardStatsAPIView(APIView):
                 'value': round(month_profit, 2)
             })
         
-        # ========== 8. Product families ==========
+        # ========== 10. Product families ==========
         families = {}
         for product in Produit.objects.filter(est_supprime=False).only('famille', 'prix_achat', 'magasins'):
             if product.prix_achat and product.magasins:
@@ -219,10 +509,7 @@ class DashboardStatsAPIView(APIView):
             for name, value in sorted(families.items(), key=lambda x: x[1], reverse=True)[:20]
         ]
         
-        # ========== 9. Fast counts with caching ==========
-        def get_total_clients():
-            return Client.objects.count()
-        
+        # ========== 11. Fast counts with caching ==========
         def get_total_products():
             return Produit.objects.filter(est_supprime=False).count()
         
@@ -238,34 +525,50 @@ class DashboardStatsAPIView(APIView):
                 date_fin__lt=timezone.now().date()
             ).count()
         
-        total_clients = self.get_cached_or_query('total_clients_count', get_total_clients, 3600)
         total_products = self.get_cached_or_query('total_products_count', get_total_products, 3600)
         total_fournisseurs = self.get_cached_or_query('total_fournisseurs_count', get_total_fournisseurs, 3600)
         pending_installments = self.get_cached_or_query('pending_installments_count', get_pending_installments, 300)
         overdue_payments = self.get_cached_or_query('overdue_payments_count', get_overdue_payments, 300)
         
-        # ========== 10. Profit percentage ==========
+        # ========== 12. Profit percentage ==========
         profit_percentage = 0
         if total_facilite_amount > 0:
             profit_percentage = ((total_facilite_amount - total_purchase_cost) / total_facilite_amount) * 100
         
         response_data = {
-            'total_clients': total_clients,
+            # Card stats
+            'total_clients': total_clients,  # All clients ever (global)
+            'new_clients': new_clients,      # New clients added in the selected period
             'total_facilite_sales': total_facilite_sales,
             'total_facilite_amount': round(total_facilite_amount, 2),
             'total_cash_sales': total_cash_sales,
             'total_cash_amount': round(total_cash_amount, 2),
             'total_product_value': round(total_product_value, 2),
             'total_expenses': round(total_expenses, 2),
+            
+            # Profit percentage
             'profit_percentage': round(profit_percentage, 2),
+            
+            # Charts
             'sales_by_user': sales_by_user,
             'monthly_profits': monthly_profits,
             'product_families': product_families,
+            
+            # Additional stats
             'total_products': total_products,
             'total_fournisseurs': total_fournisseurs,
             'pending_installments': pending_installments,
             'overdue_payments': overdue_payments,
-            'selected_year': target_year,  # Return the year used
+            
+            # Selected year
+            'selected_year': target_year,
+            
+            # Optional: date range for debugging
+            'date_range': {
+                'start': start_date.strftime('%Y-%m-%d') if start_date else None,
+                'end': end_date.strftime('%Y-%m-%d') if end_date else None,
+                'periode': periode
+            }
         }
         
         cache.set(cache_key, response_data, 300)
@@ -273,6 +576,7 @@ class DashboardStatsAPIView(APIView):
         return Response(response_data)
 
 
+# The rest of your views remain the same...
 class QuickStatsAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
