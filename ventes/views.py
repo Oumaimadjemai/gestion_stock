@@ -440,6 +440,421 @@ from django.utils.timezone import make_aware
 from collections import defaultdict
 import io
 
+# class ImportPaiementsTxtAPIView(APIView):
+#     """
+#     POST /vente/import-paiements-txt/
+#     Body: { "file": <fichier.txt> }
+    
+#     Format du fichier (positions fixes):
+#     00-01: Type d'enregistrement
+#     02-09: CCP (8 caractères)
+#     10-34: Nom (25 caractères)
+#     35-48: Montant (14 caractères, format 000000XXXXX.00)
+#     49-58: Date (10 caractères, format DD/MM/YYYY)
+#     59-62: Code banque
+#     63-68: Référence
+#     """
+    
+#     def validate_line_format(self, line):
+#         """Validate the line has minimum required length"""
+#         # Nous avons besoin d'au moins 68 caractères pour toutes les données
+#         return len(line) >= 68
+    
+#     def extract_fields(self, line):
+#         """Extract fields from a fixed-width line"""
+#         # Basé sur l'exemple: 0000189487M.BOUMEDIENE ABDELHADI     00000005700.0023/10/20250021027337011MUBHS062025033
+        
+#         # Extraire avec les positions exactes
+#         record_type = line[0:2].strip()  # 00-01
+#         ccp = line[2:10].strip()  # 02-09 (8 chars)
+#         name = line[10:35].strip()  # 10-34 (25 chars)
+#         montant_str = line[41:51].strip()  # 35-48 (14 chars)
+#         date_str = line[51:61].strip()  # 49-58 (10 chars) - DD/MM/YYYY
+#         bank_code = line[59:63].strip()  # 59-62
+#         reference = line[63:68].strip()  # 63-67
+        
+#         return {
+#             'record_type': record_type,
+#             'ccp': ccp,
+#             'name': name,
+#             'montant_str': montant_str,
+#             'date_str': date_str,
+#             'bank_code': bank_code,
+#             'reference': reference
+#         }
+    
+#     def parse_date(self, date_str):
+#         """Parse date string DD/MM/YYYY and return datetime object"""
+#         try:
+#             date_str = date_str.strip()
+            
+#             # Validation de base
+#             if len(date_str) != 10:
+#                 raise ValueError(f"Longueur de date invalide: {date_str}")
+            
+#             if date_str[2] != '/' or date_str[5] != '/':
+#                 raise ValueError(f"Format de date invalide: {date_str}")
+            
+#             # Extraire les parties
+#             day = int(date_str[0:2])
+#             month = int(date_str[3:5])
+#             year = int(date_str[6:10])
+            
+#             # Validation des valeurs
+#             if not (1 <= month <= 12):
+#                 raise ValueError(f"Mois invalide: {month}")
+            
+#             if not (1 <= day <= 31):
+#                 raise ValueError(f"Jour invalide: {day}")
+            
+#             if not (2000 <= year <= 2100):
+#                 raise ValueError(f"Année invalide: {year}")
+            
+#             # Créer l'objet datetime
+#             date_obj = datetime(year, month, day)
+            
+#             # Rendre aware pour Django
+#             aware_date = make_aware(date_obj)
+            
+#             return {
+#                 'datetime': aware_date,
+#                 'month_index': month - 1,  # 0-based pour month_index
+#                 'year': year,
+#                 'day': day
+#             }
+            
+#         except ValueError as e:
+#             raise ValueError(f"Erreur de parsing de date '{date_str}': {str(e)}")
+#         except Exception as e:
+#             raise ValueError(f"Erreur inattendue avec la date '{date_str}': {str(e)}")
+    
+#     def parse_montant(self, montant_str):
+#         """Parse amount string to Decimal"""
+#         try:
+#             # Exemple: "00000005700.00" → "5700.00" → Decimal("5700")
+#             montant_str = montant_str.strip()
+            
+#             # Supprimer les zéros en tête
+#             montant_str = montant_str.lstrip('0')
+            
+#             # Si vide après suppression, c'est 0
+#             if not montant_str:
+#                 return Decimal('0')
+            
+#             # Si on a .00 à la fin, on peut l'enlever
+#             if montant_str.endswith('.00'):
+#                 montant_str = montant_str[:-3]
+#                 # Si vide après, c'est 0
+#                 if not montant_str:
+#                     return Decimal('0')
+            
+#             # Convertir en Decimal
+#             # On utilise quantize pour enlever les décimales si .00
+#             amount = Decimal(montant_str)
+            
+#             # Si c'est un nombre entier (comme dans votre exemple), retourner comme integer
+#             if amount == amount.to_integral_value():
+#                 return Decimal(int(amount))
+            
+#             return amount
+            
+#         except Exception as e:
+#             raise ValueError(f"Montant invalide '{montant_str}': {str(e)}")
+    
+#     def handle_file(self, file_path):
+#         if not default_storage.exists(file_path):
+#             return {
+#                 "paiements_effectues": [], 
+#                 "erreurs": [{"error": "Fichier introuvable"}],
+#                 "status": "error"
+#             }
+        
+#         paiements_effectues = []
+#         erreurs = []
+#         line_number = 0
+        
+#         # Grouper par (ccp + date) → montant total
+#         grouped_paiements = defaultdict(lambda: {'montant': Decimal('0'), 'date_info': None})
+        
+#         with default_storage.open(file_path, "rb") as f:
+#             text_file = io.TextIOWrapper(f, encoding="utf-8")
+            
+#             for line in text_file:
+#                 line_number += 1
+#                 original_line = line.rstrip('\n\r')
+                
+#                 # Ignorer les lignes vides
+#                 if not original_line.strip():
+#                     continue
+                
+#                 try:
+#                     # Validation de la longueur
+#                     if not self.validate_line_format(original_line):
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "error": f"Ligne trop courte ({len(original_line)} chars, minimum 68 requis)",
+#                             "extrait": original_line[:100] + "..." if len(original_line) > 100 else original_line
+#                         })
+#                         continue
+                    
+#                     # Extraire les champs
+#                     fields = self.extract_fields(original_line)
+                    
+#                     # Validation des champs requis
+#                     if not fields['ccp']:
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "error": "CCP manquant ou vide",
+#                             "extrait": original_line[:50]
+#                         })
+#                         continue
+                    
+#                     if not fields['montant_str']:
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "error": "Montant manquant ou vide",
+#                             "ccp": fields['ccp']
+#                         })
+#                         continue
+                    
+#                     if not fields['date_str']:
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "error": "Date manquante ou vide",
+#                             "ccp": fields['ccp']
+#                         })
+#                         continue
+                    
+#                     # Parser le montant
+#                     try:
+#                         montant = self.parse_montant(fields['montant_str'])
+#                     except ValueError as e:
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "ccp": fields['ccp'],
+#                             "montant_str": fields['montant_str'],
+#                             "error": str(e)
+#                         })
+#                         continue
+                    
+#                     # Parser la date
+#                     try:
+#                         date_info = self.parse_date(fields['date_str'])
+#                     except ValueError as e:
+#                         erreurs.append({
+#                             "ligne": line_number,
+#                             "ccp": fields['ccp'],
+#                             "date_str": fields['date_str'],
+#                             "error": str(e)
+#                         })
+#                         continue
+                    
+#                     # Clé de regroupement: ccp + date complète
+#                     key = (fields['ccp'], date_info['datetime'].date())
+                    
+#                     # Ajouter au groupe
+#                     if key not in grouped_paiements or grouped_paiements[key]['date_info'] is None:
+#                         grouped_paiements[key]['date_info'] = date_info
+                    
+#                     grouped_paiements[key]['montant'] += montant
+                    
+#                 except Exception as e:
+#                     erreurs.append({
+#                         "ligne": line_number,
+#                         "extrait": original_line[:100],
+#                         "error": f"Erreur générale: {str(e)}"
+#                     })
+        
+#         # Si trop d'erreurs, arrêter
+#         if erreurs and len(erreurs) > 20:
+#             return {
+#                 "paiements_effectues": [],
+#                 "erreurs": erreurs[:50],
+#                 "status": "error",
+#                 "message": f"Trop d'erreurs ({len(erreurs)}). Importation annulée."
+#             }
+        
+#         # Appliquer les paiements groupés
+#         for (ccp, date_only), data in grouped_paiements.items():
+#             try:
+#                 # 1️⃣ Trouver le client par CCP
+#                 try:
+#                     client = Client.objects.get(ccp=ccp)
+#                 except Client.DoesNotExist:
+#                     # Essayer avec des zéros ajoutés (format 8 chiffres)
+#                     ccp_8_digits = ccp.zfill(8)
+#                     client = Client.objects.filter(ccp=ccp_8_digits).first()
+                    
+#                     if not client:
+#                         # Chercher par nom partiel (fallback)
+#                         # Note: Cette partie dépend de votre logique métier
+#                         raise Client.DoesNotExist(f"Client avec CCP {ccp} non trouvé")
+                
+#                 # 2️⃣ Trouver une vente active
+#                 vente = VenteFacilite.objects.filter(client=client, solde_regle=False).first()
+#                 if not vente:
+#                     erreurs.append({
+#                         "ccp": ccp,
+#                         "client": str(client),
+#                         "date": date_only.isoformat(),
+#                         "error": "Aucune vente active trouvée"
+#                     })
+#                     continue
+                
+#                 # 3️⃣ Vérifier si un paiement existe déjà pour cette date
+#                 existing_payment = PaiementVente.objects.filter(
+#                     vente=vente,
+#                     date_paiement__date=date_only
+#                 ).first()
+                
+#                 if existing_payment:
+#                     erreurs.append({
+#                         "ccp": ccp,
+#                         "client": str(client),
+#                         "date": date_only.isoformat(),
+#                         "error": f"Paiement existe déjà (ID: {existing_payment.id})"
+#                     })
+#                     continue
+                
+#                 # 4️⃣ Créer le paiement avec la date du fichier
+#                 date_info = data['date_info']
+#                 montant_total = data['montant']
+                
+#                 with transaction.atomic():
+#                     paiement = PaiementVente.objects.create(
+#                         vente=vente,
+#                         montant=montant_total,
+#                         date_paiement=date_info['datetime'],  # Date du fichier
+#                         month_index=date_info['month_index'],
+#                         status="paid",
+#                         year=date_info['year']  # Optionnel: stocker l'année
+#                     )
+                    
+#                     # 5️⃣ Mettre à jour la vente
+#                     vente.montant_paye_effectif += montant_total
+#                     vente.montant_restant = max(Decimal('0'), vente.montant_restant - montant_total)
+                    
+#                     if vente.montant_restant == 0:
+#                         vente.solde_regle = True
+                    
+#                     vente.last_payment_date = date_only
+#                     vente.save()
+                
+#                 paiements_effectues.append({
+#                     "client": str(client),
+#                     "ccp": ccp,
+#                     "vente_id": vente.id,
+#                     "paiement_id": paiement.id,
+#                     "montant": float(montant_total),
+#                     "date_paiement": date_info['datetime'].isoformat(),
+#                     "month": date_info['month_index'] + 1,  # 1-based pour l'affichage
+#                     "year": date_info['year'],
+#                     "day": date_info['day']
+#                 })
+                
+#             except Client.DoesNotExist:
+#                 erreurs.append({
+#                     "ccp": ccp,
+#                     "date": date_only.isoformat() if 'date_only' in locals() else "N/A",
+#                     "error": f"Client introuvable avec CCP: {ccp}"
+#                 })
+#             except Exception as e:
+#                 erreurs.append({
+#                     "ccp": ccp,
+#                     "date": date_only.isoformat() if 'date_only' in locals() else "N/A",
+#                     "error": f"Erreur lors du traitement: {str(e)}"
+#                 })
+        
+#         # Préparer la réponse
+#         result = {
+#             "paiements_effectues": paiements_effectues,
+#             "erreurs": erreurs,
+#             "statistics": {
+#                 "total_lignes_lues": line_number,
+#                 "paiements_crees": len(paiements_effectues),
+#                 "erreurs_total": len(erreurs),
+#                 "montant_total": float(sum(data['montant'] for data in grouped_paiements.values())),
+#                 "clients_traites": len(set([p['ccp'] for p in paiements_effectues]))
+#             }
+#         }
+        
+#         # Déterminer le statut
+#         if erreurs and not paiements_effectues:
+#             result["status"] = "error"
+#             result["message"] = "Aucun paiement importé"
+#         elif erreurs and paiements_effectues:
+#             result["status"] = "partial"
+#             result["message"] = f"{len(paiements_effectues)} paiements importés avec {len(erreurs)} erreurs"
+#         else:
+#             result["status"] = "success"
+#             result["message"] = f"Tous les {len(paiements_effectues)} paiements importés avec succès"
+        
+#         return result
+    
+#     def post(self, request, *args, **kwargs):
+#         file = request.FILES.get("file")
+#         if not file:
+#             return Response(
+#                 {"error": "Aucun fichier fourni", "status": "error"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         # Vérifier l'extension
+#         if not file.name.lower().endswith('.txt'):
+#             return Response(
+#                 {"error": "Le fichier doit être un fichier .txt", "status": "error"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         # Limiter la taille du fichier (optionnel)
+#         if file.size > 10 * 1024 * 1024:  # 10MB
+#             return Response(
+#                 {"error": "Fichier trop volumineux (max 10MB)", "status": "error"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         file_path = default_storage.save(f"paiements_txt/{file.name}", file)
+        
+#         try:
+#             result = self.handle_file(file_path)
+            
+#             # Retourner le statut approprié
+#             if result.get("status") == "error":
+#                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
+#             elif result.get("status") == "partial":
+#                 return Response(result, status=status.HTTP_207_MULTI_STATUS)
+#             else:
+#                 return Response(result, status=status.HTTP_201_CREATED)
+                
+#         except Exception as e:
+#             import traceback
+#             return Response({
+#                 "error": f"Erreur critique lors du traitement: {str(e)}",
+#                 "traceback": traceback.format_exc(),
+#                 "status": "error"
+#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+#         finally:
+#             # Nettoyer le fichier temporaire
+#             if default_storage.exists(file_path):
+#                 default_storage.delete(file_path)
+
+
+# ventes/views.py - Complete fixed ImportPaiementsTxtAPIView
+
+import io
+from collections import defaultdict
+from decimal import Decimal
+from django.db import transaction
+from django.utils.timezone import now, make_aware
+from django.core.files.storage import default_storage
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from datetime import datetime
+from ventes.models import Client, VenteFacilite, PaiementVente
+from django.db.models import Sum, Q
+
+
 class ImportPaiementsTxtAPIView(APIView):
     """
     POST /vente/import-paiements-txt/
@@ -457,21 +872,17 @@ class ImportPaiementsTxtAPIView(APIView):
     
     def validate_line_format(self, line):
         """Validate the line has minimum required length"""
-        # Nous avons besoin d'au moins 68 caractères pour toutes les données
         return len(line) >= 68
     
     def extract_fields(self, line):
         """Extract fields from a fixed-width line"""
-        # Basé sur l'exemple: 0000189487M.BOUMEDIENE ABDELHADI     00000005700.0023/10/20250021027337011MUBHS062025033
-        
-        # Extraire avec les positions exactes
-        record_type = line[0:2].strip()  # 00-01
-        ccp = line[2:10].strip()  # 02-09 (8 chars)
-        name = line[10:35].strip()  # 10-34 (25 chars)
-        montant_str = line[41:51].strip()  # 35-48 (14 chars)
-        date_str = line[51:61].strip()  # 49-58 (10 chars) - DD/MM/YYYY
-        bank_code = line[59:63].strip()  # 59-62
-        reference = line[63:68].strip()  # 63-67
+        record_type = line[0:2].strip()
+        ccp = line[2:10].strip()
+        name = line[10:35].strip()
+        montant_str = line[41:51].strip()
+        date_str = line[51:61].strip()
+        bank_code = line[59:63].strip()
+        reference = line[63:68].strip()
         
         return {
             'record_type': record_type,
@@ -488,19 +899,16 @@ class ImportPaiementsTxtAPIView(APIView):
         try:
             date_str = date_str.strip()
             
-            # Validation de base
             if len(date_str) != 10:
                 raise ValueError(f"Longueur de date invalide: {date_str}")
             
             if date_str[2] != '/' or date_str[5] != '/':
                 raise ValueError(f"Format de date invalide: {date_str}")
             
-            # Extraire les parties
             day = int(date_str[0:2])
             month = int(date_str[3:5])
             year = int(date_str[6:10])
             
-            # Validation des valeurs
             if not (1 <= month <= 12):
                 raise ValueError(f"Mois invalide: {month}")
             
@@ -510,15 +918,12 @@ class ImportPaiementsTxtAPIView(APIView):
             if not (2000 <= year <= 2100):
                 raise ValueError(f"Année invalide: {year}")
             
-            # Créer l'objet datetime
             date_obj = datetime(year, month, day)
-            
-            # Rendre aware pour Django
             aware_date = make_aware(date_obj)
             
             return {
                 'datetime': aware_date,
-                'month_index': month - 1,  # 0-based pour month_index
+                'month_index': month - 1,
                 'year': year,
                 'day': day
             }
@@ -531,28 +936,19 @@ class ImportPaiementsTxtAPIView(APIView):
     def parse_montant(self, montant_str):
         """Parse amount string to Decimal"""
         try:
-            # Exemple: "00000005700.00" → "5700.00" → Decimal("5700")
             montant_str = montant_str.strip()
-            
-            # Supprimer les zéros en tête
             montant_str = montant_str.lstrip('0')
             
-            # Si vide après suppression, c'est 0
             if not montant_str:
                 return Decimal('0')
             
-            # Si on a .00 à la fin, on peut l'enlever
             if montant_str.endswith('.00'):
                 montant_str = montant_str[:-3]
-                # Si vide après, c'est 0
                 if not montant_str:
                     return Decimal('0')
             
-            # Convertir en Decimal
-            # On utilise quantize pour enlever les décimales si .00
             amount = Decimal(montant_str)
             
-            # Si c'est un nombre entier (comme dans votre exemple), retourner comme integer
             if amount == amount.to_integral_value():
                 return Decimal(int(amount))
             
@@ -583,12 +979,10 @@ class ImportPaiementsTxtAPIView(APIView):
                 line_number += 1
                 original_line = line.rstrip('\n\r')
                 
-                # Ignorer les lignes vides
                 if not original_line.strip():
                     continue
                 
                 try:
-                    # Validation de la longueur
                     if not self.validate_line_format(original_line):
                         erreurs.append({
                             "ligne": line_number,
@@ -597,10 +991,8 @@ class ImportPaiementsTxtAPIView(APIView):
                         })
                         continue
                     
-                    # Extraire les champs
                     fields = self.extract_fields(original_line)
                     
-                    # Validation des champs requis
                     if not fields['ccp']:
                         erreurs.append({
                             "ligne": line_number,
@@ -625,7 +1017,6 @@ class ImportPaiementsTxtAPIView(APIView):
                         })
                         continue
                     
-                    # Parser le montant
                     try:
                         montant = self.parse_montant(fields['montant_str'])
                     except ValueError as e:
@@ -637,7 +1028,6 @@ class ImportPaiementsTxtAPIView(APIView):
                         })
                         continue
                     
-                    # Parser la date
                     try:
                         date_info = self.parse_date(fields['date_str'])
                     except ValueError as e:
@@ -649,10 +1039,8 @@ class ImportPaiementsTxtAPIView(APIView):
                         })
                         continue
                     
-                    # Clé de regroupement: ccp + date complète
                     key = (fields['ccp'], date_info['datetime'].date())
                     
-                    # Ajouter au groupe
                     if key not in grouped_paiements or grouped_paiements[key]['date_info'] is None:
                         grouped_paiements[key]['date_info'] = date_info
                     
@@ -665,7 +1053,6 @@ class ImportPaiementsTxtAPIView(APIView):
                         "error": f"Erreur générale: {str(e)}"
                     })
         
-        # Si trop d'erreurs, arrêter
         if erreurs and len(erreurs) > 20:
             return {
                 "paiements_effectues": [],
@@ -674,37 +1061,55 @@ class ImportPaiementsTxtAPIView(APIView):
                 "message": f"Trop d'erreurs ({len(erreurs)}). Importation annulée."
             }
         
-        # Appliquer les paiements groupés
+        # Appliquer les paiements groupés avec vérifications
         for (ccp, date_only), data in grouped_paiements.items():
             try:
                 # 1️⃣ Trouver le client par CCP
                 try:
                     client = Client.objects.get(ccp=ccp)
                 except Client.DoesNotExist:
-                    # Essayer avec des zéros ajoutés (format 8 chiffres)
                     ccp_8_digits = ccp.zfill(8)
                     client = Client.objects.filter(ccp=ccp_8_digits).first()
                     
                     if not client:
-                        # Chercher par nom partiel (fallback)
-                        # Note: Cette partie dépend de votre logique métier
                         raise Client.DoesNotExist(f"Client avec CCP {ccp} non trouvé")
                 
-                # 2️⃣ Trouver une vente active
-                vente = VenteFacilite.objects.filter(client=client, solde_regle=False).first()
+                # 2️⃣ Trouver une vente active ou la plus récente
+                vente = VenteFacilite.objects.filter(
+                    client=client
+                ).order_by('-date_creation').first()
+                
                 if not vente:
                     erreurs.append({
                         "ccp": ccp,
                         "client": str(client),
                         "date": date_only.isoformat(),
-                        "error": "Aucune vente active trouvée"
+                        "error": "Aucune vente trouvée pour ce client"
                     })
                     continue
                 
-                # 3️⃣ Vérifier si un paiement existe déjà pour cette date
+                date_info = data['date_info']
+                month_index = date_info['month_index']
+                montant_total = data['montant']
+                
+                # ✅ FIX 1: Vérifier si le mois est déjà payé dans mois_status
+                mois_status = vente.mois_status or ["pending"] * vente.nombre_mois
+                if month_index < len(mois_status) and mois_status[month_index] == "paid":
+                    erreurs.append({
+                        "ccp": ccp,
+                        "client": str(client),
+                        "date": date_only.isoformat(),
+                        "month": month_index + 1,
+                        "error": f"Le mois {month_index + 1} est déjà payé",
+                        "current_status": mois_status[month_index]
+                    })
+                    continue
+                
+                # ✅ FIX 2: Vérifier s'il existe déjà un paiement pour ce mois
                 existing_payment = PaiementVente.objects.filter(
                     vente=vente,
-                    date_paiement__date=date_only
+                    month_index=month_index,
+                    status="paid"
                 ).first()
                 
                 if existing_payment:
@@ -712,25 +1117,63 @@ class ImportPaiementsTxtAPIView(APIView):
                         "ccp": ccp,
                         "client": str(client),
                         "date": date_only.isoformat(),
-                        "error": f"Paiement existe déjà (ID: {existing_payment.id})"
+                        "month": month_index + 1,
+                        "error": f"Paiement existe déjà pour le mois {month_index + 1} (ID: {existing_payment.id})"
                     })
                     continue
                 
-                # 4️⃣ Créer le paiement avec la date du fichier
-                date_info = data['date_info']
-                montant_total = data['montant']
+                # ✅ FIX 3: Vérifier si la date est dans la période de vente
+                if vente.date_debut and vente.date_fin:
+                    if date_only < vente.date_debut or date_only > vente.date_fin:
+                        erreurs.append({
+                            "ccp": ccp,
+                            "client": str(client),
+                            "date": date_only.isoformat(),
+                            "month": month_index + 1,
+                            "error": f"Date {date_only} hors de la période de vente ({vente.date_debut} - {vente.date_fin})"
+                        })
+                        continue
                 
+                # ✅ FIX 4: Vérifier le montant
+                if montant_total != vente.montant_mensuel:
+                    erreurs.append({
+                        "ccp": ccp,
+                        "client": str(client),
+                        "date": date_only.isoformat(),
+                        "month": month_index + 1,
+                        "montant_attendu": float(vente.montant_mensuel),
+                        "montant_recu": float(montant_total),
+                        "error": f"Montant incorrect: {montant_total} (attendu: {vente.montant_mensuel})"
+                    })
+                    continue
+                
+                # ✅ FIX 5: Vérifier si la vente est déjà soldée
+                if vente.solde_regle:
+                    erreurs.append({
+                        "ccp": ccp,
+                        "client": str(client),
+                        "date": date_only.isoformat(),
+                        "error": "La vente est déjà complètement soldée"
+                    })
+                    continue
+                
+                # 4️⃣ Créer le paiement
                 with transaction.atomic():
                     paiement = PaiementVente.objects.create(
                         vente=vente,
                         montant=montant_total,
-                        date_paiement=date_info['datetime'],  # Date du fichier
-                        month_index=date_info['month_index'],
+                        date_paiement=date_info['datetime'],
+                        month_index=month_index,
                         status="paid",
-                        year=date_info['year']  # Optionnel: stocker l'année
+                        year=date_info['year']
                     )
                     
-                    # 5️⃣ Mettre à jour la vente
+                    # Mettre à jour mois_status
+                    if month_index < len(mois_status):
+                        mois_status[month_index] = "paid"
+                        vente.mois_status = mois_status
+                    
+                    # Mettre à jour la vente
                     vente.montant_paye_effectif += montant_total
                     vente.montant_restant = max(Decimal('0'), vente.montant_restant - montant_total)
                     
@@ -747,7 +1190,7 @@ class ImportPaiementsTxtAPIView(APIView):
                     "paiement_id": paiement.id,
                     "montant": float(montant_total),
                     "date_paiement": date_info['datetime'].isoformat(),
-                    "month": date_info['month_index'] + 1,  # 1-based pour l'affichage
+                    "month": month_index + 1,
                     "year": date_info['year'],
                     "day": date_info['day']
                 })
@@ -778,7 +1221,6 @@ class ImportPaiementsTxtAPIView(APIView):
             }
         }
         
-        # Déterminer le statut
         if erreurs and not paiements_effectues:
             result["status"] = "error"
             result["message"] = "Aucun paiement importé"
@@ -799,15 +1241,13 @@ class ImportPaiementsTxtAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Vérifier l'extension
         if not file.name.lower().endswith('.txt'):
             return Response(
                 {"error": "Le fichier doit être un fichier .txt", "status": "error"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Limiter la taille du fichier (optionnel)
-        if file.size > 10 * 1024 * 1024:  # 10MB
+        if file.size > 10 * 1024 * 1024:
             return Response(
                 {"error": "Fichier trop volumineux (max 10MB)", "status": "error"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -818,7 +1258,6 @@ class ImportPaiementsTxtAPIView(APIView):
         try:
             result = self.handle_file(file_path)
             
-            # Retourner le statut approprié
             if result.get("status") == "error":
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
             elif result.get("status") == "partial":
@@ -834,10 +1273,9 @@ class ImportPaiementsTxtAPIView(APIView):
                 "status": "error"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
-            # Nettoyer le fichier temporaire
             if default_storage.exists(file_path):
                 default_storage.delete(file_path)
-
+              
 # ventes/views.py - Fixed VenteFaciliteRetrieveUpdateDestroyAPIView
 
 from django.db import transaction
@@ -1593,7 +2031,78 @@ class VenteFaciliteCCPWordAPIView(APIView):
         response['Content-Disposition'] = f'attachment; filename="ccp_{vente.id}.docx"'
         return response
 
+# class DashboardPaiementsAPIView(APIView):
+#     def _add_months(self, value, months):
+#         month = value.month - 1 + months
+#         year = value.year + month // 12
+#         month = month % 12 + 1
+#         day = min(value.day, 28)
+#         return value.replace(year=year, month=month, day=day)
+
+#     def _parse_int(self, value):
+#         try:
+#             return int(value) if value not in (None, "") else None
+#         except (TypeError, ValueError):
+#             return None
+
+#     def get(self, request):
+#         year = self._parse_int(request.query_params.get("year"))
+#         month = self._parse_int(request.query_params.get("month"))
+#         status = request.query_params.get("status")
+
+#         ventes = VenteFacilite.objects.select_related("client").prefetch_related("paiements").all()
+#         data = []
+
+#         for vente in ventes:
+#             paiements_by_month = {}
+#             for paiement in vente.paiements.all():
+#                 payment_year = paiement.year or paiement.date_paiement.year
+#                 key = (payment_year, paiement.month_index)
+#                 paiements_by_month[key] = paiement
+
+#             mois_status = vente.mois_status or []
+
+#             for index in range(vente.nombre_mois):
+#                 due_date = self._add_months(vente.date_debut, index)
+#                 due_year = due_date.year
+#                 due_month_index = due_date.month - 1
+
+#                 if year is not None and due_year != year:
+#                     continue
+#                 if month is not None and due_month_index != month:
+#                     continue
+
+#                 paiement = paiements_by_month.get((due_year, due_month_index))
+#                 row_status = paiement.status if paiement else (
+#                     mois_status[index] if index < len(mois_status) else "pending"
+#                 )
+
+#                 if status and row_status != status:
+#                     continue
+
+#                 data.append({
+#                     "name": f"{vente.client.nom_famille_ar} {vente.client.prenom_ar}",
+#                     "account": f"{vente.client.ccp}/{vente.client.cle}",
+#                     "date": paiement.date_paiement if paiement else due_date,
+#                     "amount": paiement.montant if paiement else vente.montant_mensuel,
+#                     "status": row_status,
+#                     "clientStatus": vente.client.statut,
+#                     "month_index": due_month_index,
+#                     "year": due_year,
+#                     "vente_id": vente.id,
+#                     "paiement_id": paiement.id if paiement else None,
+#                 })
+
+#         return Response(data)
+
+
+# ventes/views.py - Fixed DashboardPaiementsAPIView with search
+
+# ventes/views.py - Updated DashboardPaiementsAPIView
+
 class DashboardPaiementsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    
     def _add_months(self, value, months):
         month = value.month - 1 + months
         year = value.year + month // 12
@@ -1611,11 +2120,95 @@ class DashboardPaiementsAPIView(APIView):
         year = self._parse_int(request.query_params.get("year"))
         month = self._parse_int(request.query_params.get("month"))
         status = request.query_params.get("status")
-
-        ventes = VenteFacilite.objects.select_related("client").prefetch_related("paiements").all()
+        search = request.query_params.get("search")
+        user_id = request.query_params.get("user")
+        vente_id = request.query_params.get("vente")
+        client_id = request.query_params.get("client")  # NEW: Add client filter
+        
+        # Start with all installment sales
+        ventes = VenteFacilite.objects.select_related("client", "utilisateur").prefetch_related("paiements").all()
+        
+        # NEW: Filter by client ID
+        if client_id:
+            try:
+                client_id = int(client_id)
+                ventes = ventes.filter(client_id=client_id)
+            except (TypeError, ValueError):
+                pass
+        
+        # Filter by user (vendeur)
+        if user_id:
+            try:
+                user_id = int(user_id)
+                ventes = ventes.filter(utilisateur_id=user_id)
+            except (TypeError, ValueError):
+                pass
+        
+        # Filter by specific vente
+        if vente_id:
+            try:
+                vente_id = int(vente_id)
+                ventes = ventes.filter(id=vente_id)
+            except (TypeError, ValueError):
+                pass
+        
+        # Apply search filter
+        if search:
+            search_term = search.strip()
+            # If search is a number, try to find by client ID or vente ID
+            if search_term.isdigit():
+                # Try to find by client ID
+                try:
+                    client = Client.objects.get(id=int(search_term))
+                    ventes = ventes.filter(client=client)
+                except Client.DoesNotExist:
+                    # Try by vente ID
+                    ventes = ventes.filter(id=int(search_term))
+            else:
+                clients = Client.objects.filter(
+                    Q(nom_famille_ar__icontains=search_term) |
+                    Q(prenom_ar__icontains=search_term) |
+                    Q(nom_famille_fr__icontains=search_term) |
+                    Q(prenom_fr__icontains=search_term) |
+                    Q(ccp__icontains=search_term)
+                )
+                
+                if clients.exists():
+                    ventes = ventes.filter(client__in=clients)
+                else:
+                    ventes = ventes.filter(
+                        Q(client__nom_famille_ar__icontains=search_term) |
+                        Q(client__prenom_ar__icontains=search_term) |
+                        Q(client__nom_famille_fr__icontains=search_term) |
+                        Q(client__prenom_fr__icontains=search_term) |
+                        Q(client__ccp__icontains=search_term)
+                    )
+        
         data = []
+        stats = {
+            "total_ventes": 0,
+            "total_amount": 0,
+            "total_paid": 0,
+            "total_restant": 0,
+            "paid_months": 0,
+            "pending_months": 0,
+            "unpaid_months": 0,
+            "progress_percentage": 0
+        }
 
+        # Group payments by vente for proper calculation
+        vente_payments = {}
+        
         for vente in ventes:
+            vente_payments[vente.id] = {
+                'paid': 0,
+                'pending': 0,
+                'unpaid': 0,
+                'total_paid_amount': 0,
+                'total_restant_amount': 0,
+                'months': []
+            }
+            
             paiements_by_month = {}
             for paiement in vente.paiements.all():
                 payment_year = paiement.year or paiement.date_paiement.year
@@ -1623,7 +2216,8 @@ class DashboardPaiementsAPIView(APIView):
                 paiements_by_month[key] = paiement
 
             mois_status = vente.mois_status or []
-
+            monthly_amount = float(vente.montant_mensuel)
+            
             for index in range(vente.nombre_mois):
                 due_date = self._add_months(vente.date_debut, index)
                 due_year = due_date.year
@@ -1638,25 +2232,93 @@ class DashboardPaiementsAPIView(APIView):
                 row_status = paiement.status if paiement else (
                     mois_status[index] if index < len(mois_status) else "pending"
                 )
+                
+                amount = float(paiement.montant) if paiement else monthly_amount
 
                 if status and row_status != status:
                     continue
 
+                # Get client name in both languages
+                client = vente.client
+                name_ar = f"{client.nom_famille_ar or ''} {client.prenom_ar or ''}".strip() or client.nom_famille_fr or client.prenom_fr or "غير معروف"
+                name_fr = f"{client.nom_famille_fr or ''} {client.prenom_fr or ''}".strip() or client.nom_famille_ar or client.prenom_ar or "Inconnu"
+
+                # Update vente payment stats
+                if row_status == "paid":
+                    vente_payments[vente.id]['paid'] += 1
+                    vente_payments[vente.id]['total_paid_amount'] += amount
+                    stats["paid_months"] += 1
+                elif row_status == "pending":
+                    vente_payments[vente.id]['pending'] += 1
+                    vente_payments[vente.id]['total_restant_amount'] += amount
+                    stats["pending_months"] += 1
+                else:  # unpaid
+                    vente_payments[vente.id]['unpaid'] += 1
+                    vente_payments[vente.id]['total_restant_amount'] += amount
+                    stats["unpaid_months"] += 1
+
+                vente_payments[vente.id]['months'].append({
+                    'month_index': due_month_index,
+                    'year': due_year,
+                    'amount': amount,
+                    'status': row_status,
+                    'paiement_id': paiement.id if paiement else None,
+                })
+
                 data.append({
-                    "name": f"{vente.client.nom_famille_ar} {vente.client.prenom_ar}",
-                    "account": f"{vente.client.ccp}/{vente.client.cle}",
+                    "name": name_ar,
+                    "name_ar": name_ar,
+                    "name_fr": name_fr,
+                    "account": client.ccp or '',
+                    "ccp": client.ccp or '',
                     "date": paiement.date_paiement if paiement else due_date,
-                    "amount": paiement.montant if paiement else vente.montant_mensuel,
+                    "amount": amount,
                     "status": row_status,
-                    "clientStatus": vente.client.statut,
+                    "clientStatus": client.statut or 'non_classifie',
                     "month_index": due_month_index,
                     "year": due_year,
                     "vente_id": vente.id,
                     "paiement_id": paiement.id if paiement else None,
+                    "utilisateur_id": vente.utilisateur_id,
+                    "utilisateur_name": vente.utilisateur.username if vente.utilisateur else None,
                 })
+        
+        # Calculate stats per vente
+        for vente_id, v_payments in vente_payments.items():
+            # Get vente total
+            try:
+                vente_obj = VenteFacilite.objects.get(id=vente_id)
+                total_amount = float(vente_obj.montant_total)
+                stats["total_amount"] += total_amount
+                stats["total_ventes"] += 1
+                
+                # Use calculated amounts instead of database values
+                stats["total_paid"] += v_payments['total_paid_amount']
+                stats["total_restant"] += v_payments['total_restant_amount']
+                
+            except VenteFacilite.DoesNotExist:
+                pass
+        
+        # Calculate progress percentage
+        if stats["total_amount"] > 0:
+            stats["progress_percentage"] = round((stats["total_paid"] / stats["total_amount"]) * 100, 2)
 
-        return Response(data)
-
+        return Response({
+            'count': len(data),
+            'results': data,
+            'next': None,
+            'previous': None,
+            'stats': {
+                'total_ventes': stats["total_ventes"],
+                'total_amount': round(stats["total_amount"], 2),
+                'total_paid': round(stats["total_paid"], 2),
+                'total_restant': round(stats["total_restant"], 2),
+                'paid_months': stats["paid_months"],
+                'pending_months': stats["pending_months"],
+                'unpaid_months': stats["unpaid_months"],
+                'progress_percentage': stats["progress_percentage"]
+            }
+        })
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
