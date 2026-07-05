@@ -124,11 +124,15 @@ ASGI_APPLICATION = "gestion_stock.asgi.application"
 
 AUTH_USER_MODEL = 'authentification.CustomUser'
 
-# ✅ Fix CORS - remove trailing slash
+# settings.py - Add these CORS settings
+
+# ✅ Fix CORS - Add all necessary headers
 CORS_ALLOWED_ORIGINS = [
     "https://darlokman.netlify.app",
     "http://localhost:3000", 
+    "http://127.0.0.1:3000",
     "https://darlokmanfront-production.up.railway.app",
+    "https://gestionstock-production.up.railway.app",  # Add your backend domain too
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -141,10 +145,39 @@ CSRF_TRUSTED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-# For development, allow all origins (optional)
+# Allow all headers and methods for development
+CORS_ALLOW_ALL_HEADERS = True
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'cache-control',
+    'pragma',
+    'x-custom-header',
+]
+
+# Add CORS preflight max age
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
+
+# For development, allow all origins
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
-
+    CORS_ALLOW_CREDENTIALS = True
 import cloudinary
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
