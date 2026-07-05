@@ -272,9 +272,7 @@ USER_TABLE = User._meta.db_table
         
 #         return Response(response_data)
 
-# stats/views.py - UPDATED DashboardStatsAPIView with both total_clients and new_clients
-
-# stats/views.py - COMPLETE FIXED VERSION
+# stats/views.py - Complete working version with user filter
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -305,7 +303,6 @@ class DashboardStatsAPIView(APIView):
     def get_date_range(self, periode, year=None):
         """
         Get date range based on periode and optional year
-        If year is provided, the date range will be calculated in that year
         """
         today = timezone.now().date()
         current_year = today.year
@@ -321,11 +318,9 @@ class DashboardStatsAPIView(APIView):
         
         # Build date ranges based on the target year
         if periode == 'today':
-            # Use today's date but in the target year
             try:
                 start_date = datetime(target_year, today.month, today.day).date()
             except ValueError:
-                # Handle invalid dates (e.g., Feb 30, 31)
                 last_day = min(today.day, 28) if today.month == 2 else min(today.day, 30)
                 start_date = datetime(target_year, today.month, last_day).date()
             end_date = start_date
@@ -340,18 +335,13 @@ class DashboardStatsAPIView(APIView):
             end_date = start_date
             
         elif periode == 'this_week':
-            # Get Monday of the current week
             days_since_monday = today.weekday()
             monday = today - timedelta(days=days_since_monday)
-            
-            # Start date: Monday in the target year
             try:
                 start_date = datetime(target_year, monday.month, monday.day).date()
             except ValueError:
                 last_day = min(monday.day, 28) if monday.month == 2 else min(monday.day, 30)
                 start_date = datetime(target_year, monday.month, last_day).date()
-            
-            # End date: today in the target year
             try:
                 end_date = datetime(target_year, today.month, today.day).date()
             except ValueError:
@@ -359,18 +349,14 @@ class DashboardStatsAPIView(APIView):
                 end_date = datetime(target_year, today.month, last_day).date()
             
         elif periode == 'this_month':
-            # Use the current month in the target year
             start_date = datetime(target_year, current_month, 1).date()
-            # End date: last day of the month
             if current_month == 12:
                 end_date = datetime(target_year, 12, 31).date()
             else:
                 end_date = datetime(target_year, current_month + 1, 1).date() - timedelta(days=1)
                 
         elif periode == 'last_month':
-            # Use the previous month in the target year
             if current_month == 1:
-                # If it's January, last month is December of previous year
                 start_date = datetime(target_year - 1, 12, 1).date()
                 end_date = datetime(target_year - 1, 12, 31).date()
             else:
@@ -382,7 +368,6 @@ class DashboardStatsAPIView(APIView):
                     end_date = datetime(target_year, month_to_use + 1, 1).date() - timedelta(days=1)
                     
         elif periode == 'this_year':
-            # Use the full target year
             start_date = datetime(target_year, 1, 1).date()
             end_date = datetime(target_year, 12, 31).date()
             
@@ -421,7 +406,7 @@ class DashboardStatsAPIView(APIView):
         if cached_response:
             return Response(cached_response)
         
-        # ========== 1. Installment sales totals ==========
+        # ========== 1. Installment sales totals - FILTERED BY USER ==========
         facilite_queryset = VenteFacilite.objects.all()
         if start_date:
             facilite_queryset = facilite_queryset.filter(
@@ -429,6 +414,7 @@ class DashboardStatsAPIView(APIView):
                 date_creation__date__lte=end_date
             )
         if user_filter:
+            # This filters all sales to only the selected user
             facilite_queryset = facilite_queryset.filter(utilisateur_id=user_filter)
         
         total_facilite_sales = facilite_queryset.count()
@@ -443,7 +429,7 @@ class DashboardStatsAPIView(APIView):
             if ligne.produit and ligne.produit.prix_achat:
                 total_purchase_cost += float(ligne.produit.prix_achat) * ligne.quantite
         
-        # ========== 3. Cash sales totals ==========
+        # ========== 3. Cash sales totals - FILTERED BY USER ==========
         cash_queryset = VenteCache.objects.all()
         if start_date:
             cash_queryset = cash_queryset.filter(
@@ -451,20 +437,21 @@ class DashboardStatsAPIView(APIView):
                 date_vente__date__lte=end_date
             )
         if user_filter:
+            # This filters cash sales to only the selected user
             cash_queryset = cash_queryset.filter(utilisateur_id=user_filter)
         
         total_cash_sales = cash_queryset.count()
         total_cash_amount = cash_queryset.aggregate(total=Sum('montant_total'))['total'] or 0
         total_cash_amount = float(total_cash_amount)
         
-        # ========== 4. Product value ==========
+        # ========== 4. Product value (NOT affected by user filter) ==========
         total_product_value = 0
         for product in Produit.objects.filter(est_supprime=False).only('prix_achat', 'magasins'):
             if product.prix_achat and product.magasins:
                 total_quantity = sum(len(mag.get('codes_barres', [])) for mag in product.magasins)
                 total_product_value += float(product.prix_achat) * total_quantity
         
-        # ========== 5. Total expenses ==========
+        # ========== 5. Total expenses (NOT affected by user filter) ==========
         expense_queryset = Depense.objects.all()
         if start_date:
             expense_queryset = expense_queryset.filter(date__gte=start_date, date__lte=end_date)
@@ -487,18 +474,56 @@ class DashboardStatsAPIView(APIView):
         
         total_clients = self.get_cached_or_query('total_clients_count', get_total_clients, 3600)
         
-        # ========== 8. Sales by user with benefits ==========
+        # ========== 8. Sales by user with benefits - FIXED ==========
         sales_by_user = []
-        if not user_filter and is_admin:
-            users_data = facilite_queryset.values('utilisateur_id', 'utilisateur__username').annotate(
+        
+        if user_filter:
+            # Show only the selected user's data
+            try:
+                selected_user = User.objects.get(id=user_filter)
+                user_name = selected_user.username
+                
+                # Get this user's sales data
+                user_sales_data = facilite_queryset.filter(utilisateur_id=user_filter).aggregate(
+                    total_sales=Sum('montant_total')
+                )
+                user_sales = float(user_sales_data['total_sales'] or 0)
+                
+                # Calculate benefit for this user
+                user_lignes = LigneVenteFacilite.objects.filter(
+                    vente__in=facilite_queryset.filter(utilisateur_id=user_filter)
+                ).select_related('produit')
+                
+                user_cost = 0
+                for ligne in user_lignes:
+                    if ligne.produit and ligne.produit.prix_achat:
+                        user_cost += float(ligne.produit.prix_achat) * ligne.quantite
+                
+                user_benefit = user_sales - user_cost
+                
+                sales_by_user.append({
+                    'name': user_name,
+                    'المبيعات': round(user_sales * 100, 2),
+                    'الفائدة': round(user_benefit * 100, 2)
+                })
+                
+            except User.DoesNotExist:
+                pass
+        else:
+            # Show all users with sales
+            users_with_sales_data = facilite_queryset.values('utilisateur_id', 'utilisateur__username').annotate(
                 total_sales=Sum('montant_total')
             ).order_by('-total_sales')
             
-            for user_data in users_data:
+            for user_data in users_with_sales_data:
                 user_id = user_data['utilisateur_id']
+                if not user_id:
+                    continue
+                    
                 user_name = user_data['utilisateur__username'] or 'غير معروف'
                 user_sales = float(user_data['total_sales'] or 0)
                 
+                # Calculate benefit for this user
                 user_lignes = LigneVenteFacilite.objects.filter(
                     vente__in=facilite_queryset.filter(utilisateur_id=user_id)
                 ).select_related('produit')
@@ -516,8 +541,7 @@ class DashboardStatsAPIView(APIView):
                     'الفائدة': round(user_benefit * 100, 2)
                 })
         
-        # ========== 9. Monthly profits ==========
-        # Use the selected year if provided, otherwise current year
+        # ========== 9. Monthly profits - FILTERED BY USER ==========
         target_year = int(year_filter) if year_filter and year_filter.isdigit() else timezone.now().year
         
         months = ["جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
@@ -530,6 +554,7 @@ class DashboardStatsAPIView(APIView):
                 date_creation__month=month
             )
             if user_filter:
+                # This filters monthly profits to only the selected user
                 month_ventes = month_ventes.filter(utilisateur_id=user_filter)
             
             month_sales = month_ventes.aggregate(total=Sum('montant_total'))['total'] or 0
@@ -551,7 +576,7 @@ class DashboardStatsAPIView(APIView):
                 'value': round(month_profit, 2)
             })
         
-        # ========== 10. Product families ==========
+        # ========== 10. Product families (NOT affected by user filter) ==========
         families = {}
         for product in Produit.objects.filter(est_supprime=False).only('famille', 'prix_achat', 'magasins'):
             if product.prix_achat and product.magasins:
@@ -593,34 +618,30 @@ class DashboardStatsAPIView(APIView):
             profit_percentage = ((total_facilite_amount - total_purchase_cost) / total_facilite_amount) * 100
         
         response_data = {
-            # Card stats
+            # Card stats - these show filtered data based on user
             'total_clients': total_clients,
             'new_clients': new_clients,
-            'total_facilite_sales': total_facilite_sales,
-            'total_facilite_amount': round(total_facilite_amount, 2),
-            'total_cash_sales': total_cash_sales,
-            'total_cash_amount': round(total_cash_amount, 2),
-            'total_product_value': round(total_product_value, 2),
-            'total_expenses': round(total_expenses, 2),
+            'total_facilite_sales': total_facilite_sales,  # Only selected user's sales
+            'total_facilite_amount': round(total_facilite_amount, 2),  # Only selected user's amount
+            'total_cash_sales': total_cash_sales,  # Only selected user's cash sales
+            'total_cash_amount': round(total_cash_amount, 2),  # Only selected user's cash amount
+            'total_product_value': round(total_product_value, 2),  # Global (not filtered)
+            'total_expenses': round(total_expenses, 2),  # Global (not filtered)
             
-            # Profit percentage
+            # Profit percentage - based on selected user's data
             'profit_percentage': round(profit_percentage, 2),
             
-            # Charts
-            'sales_by_user': sales_by_user,
-            'monthly_profits': monthly_profits,
-            'product_families': product_families,
+            # Charts - show selected user's data
+            'sales_by_user': sales_by_user,  # Shows only selected user if filtered
+            'monthly_profits': monthly_profits,  # Filtered by user
+            'product_families': product_families,  # Global (not filtered)
             
             # Additional stats
             'total_products': total_products,
             'total_fournisseurs': total_fournisseurs,
             'pending_installments': pending_installments,
             'overdue_payments': overdue_payments,
-            
-            # Selected year
             'selected_year': target_year,
-            
-            # Date range for debugging
             'date_range': {
                 'start': start_date.strftime('%Y-%m-%d') if start_date else None,
                 'end': end_date.strftime('%Y-%m-%d') if end_date else None,
@@ -631,10 +652,6 @@ class DashboardStatsAPIView(APIView):
         cache.set(cache_key, response_data, 300)
         
         return Response(response_data)
-
-
-# Keep your other views (QuickStatsAPIView, SalesReportAPIView, etc.) as they are
-# The rest of your views remain the same...
 class QuickStatsAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
