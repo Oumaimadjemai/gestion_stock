@@ -274,6 +274,8 @@ USER_TABLE = User._meta.db_table
 
 # stats/views.py - UPDATED DashboardStatsAPIView with both total_clients and new_clients
 
+# stats/views.py - COMPLETE FIXED VERSION
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -303,37 +305,92 @@ class DashboardStatsAPIView(APIView):
     def get_date_range(self, periode, year=None):
         """
         Get date range based on periode and optional year
+        If year is provided, the date range will be calculated in that year
         """
         today = timezone.now().date()
+        current_year = today.year
+        current_month = today.month
         
-        # If year is specified, use that year for calculations
+        # If year is provided and valid, use it as the base year
+        target_year = current_year
         if year:
             try:
-                year = int(year)
-                ranges = {
-                    'today': (today, today),
-                    'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
-                    'this_week': (today - timedelta(days=today.weekday()), today),
-                    'this_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
-                    'last_month': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
-                    'this_year': (datetime(year, 1, 1).date(), datetime(year, 12, 31).date()),
-                }
+                target_year = int(year)
             except ValueError:
-                year = None
+                pass
         
-        if not year:
-            ranges = {
-                'today': (today, today),
-                'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
-                'this_week': (today - timedelta(days=today.weekday()), today),
-                'this_month': (today.replace(day=1), today),
-                'last_month': ((today.replace(day=1) - timedelta(days=1)).replace(day=1), today.replace(day=1) - timedelta(days=1)),
-                'this_year': (today.replace(month=1, day=1), today),
-            }
+        # Build date ranges based on the target year
+        if periode == 'today':
+            # Use today's date but in the target year
+            try:
+                start_date = datetime(target_year, today.month, today.day).date()
+            except ValueError:
+                # Handle invalid dates (e.g., Feb 30, 31)
+                last_day = min(today.day, 28) if today.month == 2 else min(today.day, 30)
+                start_date = datetime(target_year, today.month, last_day).date()
+            end_date = start_date
+            
+        elif periode == 'yesterday':
+            yesterday = today - timedelta(days=1)
+            try:
+                start_date = datetime(target_year, yesterday.month, yesterday.day).date()
+            except ValueError:
+                last_day = min(yesterday.day, 28) if yesterday.month == 2 else min(yesterday.day, 30)
+                start_date = datetime(target_year, yesterday.month, last_day).date()
+            end_date = start_date
+            
+        elif periode == 'this_week':
+            # Get Monday of the current week
+            days_since_monday = today.weekday()
+            monday = today - timedelta(days=days_since_monday)
+            
+            # Start date: Monday in the target year
+            try:
+                start_date = datetime(target_year, monday.month, monday.day).date()
+            except ValueError:
+                last_day = min(monday.day, 28) if monday.month == 2 else min(monday.day, 30)
+                start_date = datetime(target_year, monday.month, last_day).date()
+            
+            # End date: today in the target year
+            try:
+                end_date = datetime(target_year, today.month, today.day).date()
+            except ValueError:
+                last_day = min(today.day, 28) if today.month == 2 else min(today.day, 30)
+                end_date = datetime(target_year, today.month, last_day).date()
+            
+        elif periode == 'this_month':
+            # Use the current month in the target year
+            start_date = datetime(target_year, current_month, 1).date()
+            # End date: last day of the month
+            if current_month == 12:
+                end_date = datetime(target_year, 12, 31).date()
+            else:
+                end_date = datetime(target_year, current_month + 1, 1).date() - timedelta(days=1)
+                
+        elif periode == 'last_month':
+            # Use the previous month in the target year
+            if current_month == 1:
+                # If it's January, last month is December of previous year
+                start_date = datetime(target_year - 1, 12, 1).date()
+                end_date = datetime(target_year - 1, 12, 31).date()
+            else:
+                month_to_use = current_month - 1
+                start_date = datetime(target_year, month_to_use, 1).date()
+                if month_to_use == 12:
+                    end_date = datetime(target_year, 12, 31).date()
+                else:
+                    end_date = datetime(target_year, month_to_use + 1, 1).date() - timedelta(days=1)
+                    
+        elif periode == 'this_year':
+            # Use the full target year
+            start_date = datetime(target_year, 1, 1).date()
+            end_date = datetime(target_year, 12, 31).date()
+            
+        else:
+            start_date = None
+            end_date = None
         
-        if periode in ranges:
-            return {'start': ranges[periode][0], 'end': ranges[periode][1]}
-        return {'start': None, 'end': None}
+        return {'start': start_date, 'end': end_date}
     
     def get_cached_or_query(self, cache_key, query_func, timeout=300):
         cached_data = cache.get(cache_key)
@@ -347,7 +404,7 @@ class DashboardStatsAPIView(APIView):
     def get(self, request):
         periode = request.query_params.get('periode', 'this_month')
         user_filter = request.query_params.get('user', None)
-        year_filter = request.query_params.get('year', None)  # Year filter
+        year_filter = request.query_params.get('year', None)
         
         is_admin = request.user.role == 'admin'
         if not is_admin:
@@ -537,8 +594,8 @@ class DashboardStatsAPIView(APIView):
         
         response_data = {
             # Card stats
-            'total_clients': total_clients,  # All clients ever (global)
-            'new_clients': new_clients,      # New clients added in the selected period
+            'total_clients': total_clients,
+            'new_clients': new_clients,
             'total_facilite_sales': total_facilite_sales,
             'total_facilite_amount': round(total_facilite_amount, 2),
             'total_cash_sales': total_cash_sales,
@@ -563,7 +620,7 @@ class DashboardStatsAPIView(APIView):
             # Selected year
             'selected_year': target_year,
             
-            # Optional: date range for debugging
+            # Date range for debugging
             'date_range': {
                 'start': start_date.strftime('%Y-%m-%d') if start_date else None,
                 'end': end_date.strftime('%Y-%m-%d') if end_date else None,
@@ -576,6 +633,7 @@ class DashboardStatsAPIView(APIView):
         return Response(response_data)
 
 
+# Keep your other views (QuickStatsAPIView, SalesReportAPIView, etc.) as they are
 # The rest of your views remain the same...
 class QuickStatsAPIView(APIView):
     permission_classes = [IsAuthenticated]
