@@ -13,7 +13,14 @@ SECRET_KEY = config("SECRET_KEY", default="unsafe-secret-key")
 DEBUG = config("DEBUG", default=False, cast=bool)
 
 # ✅ Update ALLOWED_HOSTS for local development
-ALLOWED_HOSTS = ["gestionstock-production.up.railway.app", "localhost", "127.0.0.1", ".railway.app"]
+ALLOWED_HOSTS = [
+    "darlokman.com",
+    "www.darlokman.com",
+    "localhost", 
+    "127.0.0.1",
+    "gestionstock-production.up.railway.app",  # Garder pour transition
+    ".railway.app"
+]
 
 # Database
 DATABASES = {
@@ -132,10 +139,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000", 
     "http://127.0.0.1:3000",
     "https://darlokmanfront-production.up.railway.app",
-    "https://gestionstock-production.up.railway.app",  # Add your backend domain too
+    "https://darlokman.com",
+    "https://www.darlokman.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
+    'https://darlokman.com',
+    'https://www.darlokman.com',
     'https://gestionstock-production.up.railway.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
